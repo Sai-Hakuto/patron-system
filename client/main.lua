@@ -195,6 +195,11 @@ local function RegisterAIOHandlers()
                                 if currentId == data.speakerId then
                                         cs.smallTalk = data.smallTalk
                                         cs.availableSmallTalks = data.availableSmallTalks
+                                        PatronSystemNS.DataManager:SetToCache(
+                                                PatronSystemNS.DataManager.speakerCache,
+                                                data.speakerType .. "_" .. data.speakerId,
+                                                cs
+                                        )
 
                                         if data.speakerType == PatronSystemNS.Config.SpeakerType.PATRON then
                                                 if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() and
