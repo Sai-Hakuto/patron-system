@@ -87,7 +87,7 @@ function PatronSystemNS.DialogueEngine:EndDialogue()
     PatronSystemNS.Logger:Dialogue("Завершение диалога")
     
     -- Запоминаем ID покровителя перед очисткой состояния
-    local patronId = self.currentSpeakerID
+    local speakerId = self.currentSpeakerID
     
     self.isInDialogueMode = false
     self.currentDialogue = nil
@@ -99,9 +99,12 @@ function PatronSystemNS.DialogueEngine:EndDialogue()
     end
     
     -- НОВОЕ: Запрашиваем обновление SmallTalk после завершения диалога
-    if patronId and self.currentSpeakerType == PatronSystemNS.Config.SpeakerType.PATRON then
+    if speakerId and self.currentSpeakerType then
         PatronSystemNS.Logger:Dialogue("Запрашиваем обновление SmallTalk после завершения диалога")
-        AIO.Handle(PatronSystemNS.ADDON_PREFIX, "RefreshSmallTalk", patronId)
+        AIO.Handle(PatronSystemNS.ADDON_PREFIX, "RefreshSmallTalk", {
+            speakerId = speakerId,
+            speakerType = self.currentSpeakerType
+        })
     end
 end
 
