@@ -185,17 +185,21 @@ local function RegisterAIOHandlers()
 
                         local cs = PatronSystemNS.UIManager.currentSpeaker
                         if cs and cs.SpeakerType == data.speakerType then
-                                local currentId
-                                local eventId = tonumber(data.speakerId)
+                                local currentId = nil
                                 if data.speakerType == PatronSystemNS.Config.SpeakerType.PATRON then
                                         currentId = cs.PatronID
                                 elseif data.speakerType == PatronSystemNS.Config.SpeakerType.FOLLOWER then
-                                        currentId = tonumber(cs.FollowerID)
+                                        currentId = cs.FollowerID
                                 end
 
-                                if currentId == eventId then
+                                if currentId == data.speakerId then
                                         cs.smallTalk = data.smallTalk
                                         cs.availableSmallTalks = data.availableSmallTalks
+                                        PatronSystemNS.DataManager:SetToCache(
+                                                PatronSystemNS.DataManager.speakerCache,
+                                                data.speakerType .. "_" .. data.speakerId,
+                                                cs
+                                        )
 
                                         if data.speakerType == PatronSystemNS.Config.SpeakerType.PATRON then
                                                 if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() and
@@ -219,6 +223,7 @@ local function RegisterAIOHandlers()
                                         end
                                 end
                         end
+
 
                         -- Триггерим событие для других систем
                         EventDispatcher:TriggerEvent("SmallTalkRefreshed", data)
