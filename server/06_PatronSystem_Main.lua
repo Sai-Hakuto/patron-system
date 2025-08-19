@@ -396,6 +396,10 @@ local function HandleRequestFollowerData(player, requestData)
         })
     end
     
+    -- Получаем SmallTalk через SmallTalkCore
+    local smallTalk = isFollowerUnlocked and PatronSmallTalkCore.SelectRandomSmallTalk(player, followerId) or "Этот фолловер пока не открыт."
+    local availableSmallTalks = isFollowerUnlocked and PatronSmallTalkCore.GetSmallTalkListForClient(player, followerId) or {}
+    
     -- Строим данные фолловера для клиента
     local safeFollowerData = {
         SpeakerID = followerId,
@@ -405,14 +409,14 @@ local function HandleRequestFollowerData(player, requestData)
         Alignment = followerInfo.Aligment, -- используем орфографию из исходных данных
         Description = followerInfo.Description,
         NpcEntryID = followerInfo.NpcEntryID,
-        
+
         -- Статус доступности
         isUnlocked = isFollowerUnlocked,
-        
+
         -- Базовые данные для совместимости с системой диалогов
         relationshipPoints = 0,
-        smallTalk = isFollowerUnlocked and "Я готов к твоим приказам." or "Этот фолловер пока не открыт.",
-        availableSmallTalks = {}
+        smallTalk = smallTalk,
+        availableSmallTalks = availableSmallTalks
     }
     
     -- Если фолловер заблокирован, отправляем ограниченные данные
@@ -420,6 +424,7 @@ local function HandleRequestFollowerData(player, requestData)
         safeFollowerData.smallTalk = "Вы еще не открыли этого фолловера. Развивайте отношения с покровителями для получения новых союзников."
         safeFollowerData.Name = "???"  -- Скрываем имя
         safeFollowerData.Description = "Заблокированный фолловер"
+        safeFollowerData.availableSmallTalks = {}
     end
     
     PatronLogger:Info("MainAIO", "HandleRequestFollowerData", "Sending follower data to client", {
