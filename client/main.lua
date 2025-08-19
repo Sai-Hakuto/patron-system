@@ -224,6 +224,7 @@ local function RegisterAIOHandlers()
                                 end
                         end
 
+
                         -- Триггерим событие для других систем
                         EventDispatcher:TriggerEvent("SmallTalkRefreshed", data)
                 end,
