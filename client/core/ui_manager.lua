@@ -161,9 +161,8 @@ function PatronSystemNS.UIManager:ShowFollowerWindowSmart()
         end
     end
 
-    -- 3) Показываем окно (nil допустим: окно отрисует плейсхолдер)
-    PatronSystemNS.FollowerWindow:Show(chosenId)
-    self:RegisterWindow(PatronSystemNS.Config.WindowType.FOLLOWER, PatronSystemNS.FollowerWindow)
+    -- 3) Показываем окно через общий метод (nil допустим: окно отрисует плейсхолдер)
+    self:ShowFollowerWindow(chosenId)
 end
 
 function PatronSystemNS.UIManager:ShowFollowerWindow(followerID)
