@@ -689,15 +689,16 @@ HandlePlayerChoice = function(player, choiceNodeId)
         local playerProgress = PatronDBManager.LoadPlayerProgress(playerGuid)
         
         local actionResult = PatronGameLogicCore.ExecuteDialogueActions(
-            choiceResult.actions, 
-            player, 
+            choiceResult.actions,
+            player,
             playerProgress
         )
-        
+
         SafeSendResponse(player, "ActionsExecuted", {
             success = actionResult.success,
             message = actionResult.success and "Действия выполнены успешно" or actionResult.error,
-            results = actionResult.results
+            results = actionResult.results,
+            progressData = playerProgress
         })
         
         -- ИСПРАВЛЕНИЕ: Не возвращаемся сразу, проверяем есть ли следующий диалог

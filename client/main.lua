@@ -111,7 +111,11 @@ local function RegisterAIOHandlers()
         -- РЕЗУЛЬТАТЫ ДЕЙСТВИЙ
         ActionsExecuted = function(_, data)
             PatronSystemNS.Logger:AIO("Результат действий: " .. (data.message or ""))
-            
+
+            if data.progressData then
+                PatronSystemNS.DataManager:UpdatePlayerProgressCache(data.progressData)
+            end
+
             if data.success then
                 -- ЭТАП 4: События вместо прямых вызовов
                 EventDispatcher:TriggerEvent("ActionsCompleted", data)
