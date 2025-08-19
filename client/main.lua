@@ -214,6 +214,7 @@ local function RegisterAIOHandlers()
 
                                                         PatronSystemNS.Logger:Info("SmallTalk обновлен в окне: " .. string.sub(data.smallTalk, 1, 30) .. "...")
                                                 end
+
                                         end
                                 end
                         end
@@ -301,8 +302,8 @@ local function RegisterModuleListeners()
     
     -- НОВОЕ: Слушатель для SmallTalkRefreshed
     EventDispatcher:RegisterListener("SmallTalkRefreshed", "SmallTalkHandler", function(data)
-        PatronSystemNS.Logger:Info("SmallTalk refresh event processed for " .. (data.speakerType or "unknown") ..
-            ": " .. (data.speakerId or "unknown"))
+        local t = data.patronId and "patron" or (data.followerId and "follower" or "unknown")
+        PatronSystemNS.Logger:Info("SmallTalk refresh event processed for " .. t .. ": " .. (data.patronId or data.followerId or "unknown"))
     end)
     
     PatronSystemNS.Logger:Info("Слушатели модулей зарегистрированы (ИСПРАВЛЕНИЕ)Этап 5")
