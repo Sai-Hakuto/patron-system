@@ -404,6 +404,7 @@ local function HandleRequestFollowerData(player, requestData)
     local safeFollowerData = {
         SpeakerID = followerId,
         SpeakerType = "follower",
+        FollowerID = followerId,
         Name = followerInfo.FollowerName,
         PatronID = followerInfo.PatronID, -- К какому покровителю привязан
         Alignment = followerInfo.Aligment, -- используем орфографию из исходных данных
