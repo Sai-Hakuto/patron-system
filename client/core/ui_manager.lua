@@ -114,7 +114,10 @@ function PatronSystemNS.UIManager:ShowPatronWindow(patronID)
     
     -- НОВОЕ: При переоткрытии окна также запрашиваем обновление SmallTalk
     PatronSystemNS.Logger:UI("Запрашиваем обновление SmallTalk при открытии окна для покровителя: " .. patronID)
-    AIO.Handle(PatronSystemNS.ADDON_PREFIX, "RefreshSmallTalk", patronID)
+    AIO.Handle(PatronSystemNS.ADDON_PREFIX, "RefreshSmallTalk", {
+        speakerId = patronID,
+        speakerType = PatronSystemNS.Config.SpeakerType.PATRON
+    })
 end
 
 function PatronSystemNS.UIManager:ShowPatronWindowSmart()
@@ -214,6 +217,12 @@ function PatronSystemNS.UIManager:ShowFollowerWindow(followerID)
             self:TriggerEvent("SpeakerDataReceived", data)
         end
     )
+
+    -- НОВОЕ: Запрашиваем обновление SmallTalk при открытии окна для фолловера
+    AIO.Handle(PatronSystemNS.ADDON_PREFIX, "RefreshSmallTalk", {
+        speakerId = followerID,
+        speakerType = PatronSystemNS.Config.SpeakerType.FOLLOWER
+    })
 end
 
 function PatronSystemNS.UIManager:GetMaxFrameLevel()

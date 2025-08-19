@@ -765,35 +765,41 @@ local function HandlePrayerAction(player, data)
     return success
 end
 
--- Обновление SmallTalk фраз
-local function HandleRefreshSmallTalk(player, patronId)
+-- Оновлення SmallTalk фраз (патрон/фолловер)
+local function HandleRefreshSmallTalk(player, data)
+    local speakerId = data and data.speakerId
+    local speakerType = data and data.speakerType
+
     PatronLogger:Info("MainAIO", "HandleRefreshSmallTalk", "Refreshing SmallTalk", {
         player = player:GetName(),
-        patron_id = patronId
+        speaker_id = speakerId,
+        speaker_type = speakerType
     })
-    
+
     -- Инвалидируем кэш для получения новых фраз
     local playerGuid = tostring(player:GetGUID())
-    PatronSmallTalkCore.InvalidatePlayerCache(playerGuid, patronId)
-    
+    PatronSmallTalkCore.InvalidatePlayerCache(playerGuid, speakerId)
+
     -- Получаем новую фразу и список доступных
-    local newSmallTalk = PatronSmallTalkCore.SelectRandomSmallTalk(player, patronId)
-    local availableSmallTalks = PatronSmallTalkCore.GetSmallTalkListForClient(player, patronId)
-    
+    local newSmallTalk = PatronSmallTalkCore.SelectRandomSmallTalk(player, speakerId)
+    local availableSmallTalks = PatronSmallTalkCore.GetSmallTalkListForClient(player, speakerId)
+
     local refreshData = {
-        patronId = patronId,
+        speakerId = speakerId,
+        speakerType = speakerType,
         smallTalk = newSmallTalk,
         availableSmallTalks = availableSmallTalks
     }
-    
+
     SafeSendResponse(player, "SmallTalkRefreshed", refreshData)
-    
+
     PatronLogger:Info("MainAIO", "HandleRefreshSmallTalk", "SmallTalk refreshed", {
-        patron_id = patronId,
+        speaker_id = speakerId,
+        speaker_type = speakerType,
         new_smalltalk_preview = string.sub(newSmallTalk, 1, 30) .. "...",
         available_count = #availableSmallTalks
     })
-    
+
     return true
 end
 
