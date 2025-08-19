@@ -228,11 +228,10 @@ function NS.FollowerWindow:SelectFollower(followerID)
   
   -- ИСПРАВЛЕНО: Всегда обновляем подсветку ПЕРВЫМ ДЕЛОМ
   self:UpdateFollowerButtonHighlight(followerID)
-  
-  -- Если тот же фолловер, пропускаем загрузку данных
+
+  -- Всегда загружаем данные, даже если выбран тот же фолловер
   if followerID == self.currentFollowerID then
-    NS.Logger:UI("Same follower, skipping data load")
-    return
+    NS.Logger:UI("Same follower selected again; reloading data")
   end
 
   -- ИСПРАВЛЕНО: Сохраняем выбор ТОЛЬКО здесь
@@ -422,8 +421,10 @@ function NS.FollowerWindow:Show(followerID)
   if not isTargetValid then
     target = unlocked[1]
   end
-  
-  if target then 
+
+  if target then
+    -- Сбрасываем текущий ID, чтобы запросить свежие данные даже при повторном выборе
+    self.currentFollowerID = nil
     self:SelectFollower(target)
   end
 end
