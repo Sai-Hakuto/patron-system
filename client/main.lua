@@ -185,14 +185,15 @@ local function RegisterAIOHandlers()
 
                         local cs = PatronSystemNS.UIManager.currentSpeaker
                         if cs and cs.SpeakerType == data.speakerType then
-                                local currentId = nil
+                                local currentId
+                                local eventId = tonumber(data.speakerId)
                                 if data.speakerType == PatronSystemNS.Config.SpeakerType.PATRON then
                                         currentId = cs.PatronID
                                 elseif data.speakerType == PatronSystemNS.Config.SpeakerType.FOLLOWER then
-                                        currentId = cs.FollowerID
+                                        currentId = tonumber(cs.FollowerID)
                                 end
 
-                                if currentId == data.speakerId then
+                                if currentId == eventId then
                                         cs.smallTalk = data.smallTalk
                                         cs.availableSmallTalks = data.availableSmallTalks
 
