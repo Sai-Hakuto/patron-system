@@ -1,0 +1,47 @@
+## Interface: 11506, 11507, 20504, 30404, 40402, 40401, 50500, 110105, 110107, 110100
+## Title: Patron System
+## Notes: Модульная система покровителей и фолловеров с диалогами и портретами
+## Version: 2.4.0
+## Author: Your Name
+## SavedVariables: PatronSystemDB
+
+# Порядок загрузки (НОВЫЕ ОКНА):
+
+# Инициализация неймспейса
+init.lua
+
+# Конфигурация
+config.lua
+
+# Логирование
+utils/logger.lua
+
+# Базовый UI класс окна
+ui/base_window.lua
+
+# Основное окно модуля
+ui/main_window.lua
+
+# Окно покровителей
+ui/patron_window.lua
+
+# НОВОЕ: Окно фолловеров
+ui/follower_window.lua
+
+# НОВОЕ: Окно благословений
+ui/blessing_window.lua
+
+# НОВОЕ: Окно магазина
+ui/shop_window.lua
+
+# Менеджер данных
+core/data_manager.lua
+
+# Движок диалогов
+core/dialogue_engine.lua
+
+# UI менеджер
+core/ui_manager.lua
+
+# Главная инициализация
+main.lua
