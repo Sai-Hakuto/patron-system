@@ -122,14 +122,12 @@ end
 
 function PatronSystemNS.UIManager:ShowPatronWindowSmart()
     -- Эта функция используется из MainWindow для кнопки "Patrons"
-    
     if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() then
-        -- Окно уже открыто - просто поднимаем его наверх, НЕ меняем покровителя
-        PatronSystemNS.Logger:UI("Окно покровителей уже открыто, поднимаем наверх")
-        self:BringWindowToFront(PatronSystemNS.Config.WindowType.PATRON)
+        PatronSystemNS.Logger:UI("Окно покровителей уже открыто, скрываем")
+        PatronSystemNS.PatronWindow:Hide()
         return
     end
-    
+
     -- Окно закрыто - открываем с последним запомненным покровителем
     local lastPatronID = PatronSystemNS.PatronWindow.lastPatronID or 1
     PatronSystemNS.Logger:UI("Открываем окно покровителей с последним ID: " .. lastPatronID)
@@ -139,6 +137,12 @@ end
 function PatronSystemNS.UIManager:ShowFollowerWindowSmart()
     if not PatronSystemNS.FollowerWindow then
         PatronSystemNS.Logger:Error("FollowerWindow не загружен!")
+        return
+    end
+
+    if PatronSystemNS.FollowerWindow:IsShown() then
+        PatronSystemNS.Logger:UI("FollowerWindow уже открыт, скрываем")
+        PatronSystemNS.FollowerWindow:Hide()
         return
     end
 
