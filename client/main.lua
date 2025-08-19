@@ -178,32 +178,49 @@ local function RegisterAIOHandlers()
 			EventDispatcher:TriggerEvent("PlayerInitialized", data)
 		end,
 		
-		-- НОВОЕ: Обработчик обновления SmallTalk
-		SmallTalkRefreshed = function(_, data)
-			PatronSystemNS.Logger:AIO("SmallTalk обновлен для покровителя: " .. (data.patronId or "неизвестно"))
-			
-			-- Обновляем данные в UIManager если он отображает этого покровителя
-			if PatronSystemNS.UIManager.currentSpeaker and 
-			   PatronSystemNS.UIManager.currentSpeaker.PatronID == data.patronId then
-				
-				-- Обновляем текущую SmallTalk фразу
-				PatronSystemNS.UIManager.currentSpeaker.smallTalk = data.smallTalk
-				PatronSystemNS.UIManager.currentSpeaker.availableSmallTalks = data.availableSmallTalks
-				
-				-- Если окно открыто и НЕ в режиме диалога - показываем новую фразу
-				if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() and 
-				   not PatronSystemNS.PatronWindow.isInDialogueMode then
-					
-					PatronSystemNS.PatronWindow.elements.dialogText:SetText(data.smallTalk)
-					PatronSystemNS.PatronWindow:AdjustDialogContainerSize(data.smallTalk)
-					
-					PatronSystemNS.Logger:Info("SmallTalk обновлен в окне: " .. string.sub(data.smallTalk, 1, 30) .. "...")
-				end
-			end
-			
-			-- Триггерим событие для других систем
-			EventDispatcher:TriggerEvent("SmallTalkRefreshed", data)
-		end,
+                -- НОВОЕ: Обработчик обновления SmallTalk
+                SmallTalkRefreshed = function(_, data)
+                        PatronSystemNS.Logger:AIO("SmallTalk обновлен: " .. (data.speakerId or "неизвестно") ..
+                            " (" .. (data.speakerType or "unknown") .. ")")
+
+                        local cs = PatronSystemNS.UIManager.currentSpeaker
+                        if cs and cs.SpeakerType == data.speakerType then
+                                local currentId = nil
+                                if data.speakerType == PatronSystemNS.Config.SpeakerType.PATRON then
+                                        currentId = cs.PatronID
+                                elseif data.speakerType == PatronSystemNS.Config.SpeakerType.FOLLOWER then
+                                        currentId = cs.FollowerID
+                                end
+
+                                if currentId == data.speakerId then
+                                        cs.smallTalk = data.smallTalk
+                                        cs.availableSmallTalks = data.availableSmallTalks
+
+                                        if data.speakerType == PatronSystemNS.Config.SpeakerType.PATRON then
+                                                if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() and
+                                                   not PatronSystemNS.PatronWindow.isInDialogueMode then
+
+                                                        PatronSystemNS.PatronWindow.elements.dialogText:SetText(data.smallTalk)
+                                                        PatronSystemNS.PatronWindow:AdjustDialogContainerSize(data.smallTalk)
+
+                                                        PatronSystemNS.Logger:Info("SmallTalk обновлен в окне: " .. string.sub(data.smallTalk, 1, 30) .. "...")
+                                                end
+                                        elseif data.speakerType == PatronSystemNS.Config.SpeakerType.FOLLOWER then
+                                                if PatronSystemNS.FollowerWindow and PatronSystemNS.FollowerWindow:IsShown() and
+                                                   not (PatronSystemNS.FollowerWindow.state and PatronSystemNS.FollowerWindow.state.inDialogue) then
+
+                                                        PatronSystemNS.FollowerWindow.elements.dialogText:SetText(data.smallTalk)
+                                                        PatronSystemNS.FollowerWindow:AdjustDialogContainerSize(data.smallTalk)
+
+                                                        PatronSystemNS.Logger:Info("SmallTalk обновлен в окне: " .. string.sub(data.smallTalk, 1, 30) .. "...")
+                                                end
+                                        end
+                                end
+                        end
+
+                        -- Триггерим событие для других систем
+                        EventDispatcher:TriggerEvent("SmallTalkRefreshed", data)
+                end,
 		
 		PurchaseResult = function(_, data)
 			PatronSystemNS.Logger:AIO("Результат покупки: " .. tostring(data.success))
@@ -284,7 +301,8 @@ local function RegisterModuleListeners()
     
     -- НОВОЕ: Слушатель для SmallTalkRefreshed
     EventDispatcher:RegisterListener("SmallTalkRefreshed", "SmallTalkHandler", function(data)
-        PatronSystemNS.Logger:Info("SmallTalk refresh event processed for patron: " .. (data.patronId or "unknown"))
+        PatronSystemNS.Logger:Info("SmallTalk refresh event processed for " .. (data.speakerType or "unknown") ..
+            ": " .. (data.speakerId or "unknown"))
     end)
     
     PatronSystemNS.Logger:Info("Слушатели модулей зарегистрированы (ИСПРАВЛЕНИЕ)Этап 5")
