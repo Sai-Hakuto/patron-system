@@ -359,7 +359,12 @@ end
 -- НОВОЕ: Современная обработка через события вместо прямых вызовов
 function PatronSystemNS.UIManager:OnSpeakerDataReceived(speakerData)
     PatronSystemNS.Logger:UI("Получены данные о говорящем: " .. (speakerData.Name or "Неизвестно"))
-    
+
+    -- Гарантируем наличие FollowerID в данных текущего говорящего
+    if speakerData.SpeakerType == PatronSystemNS.Config.SpeakerType.FOLLOWER then
+        speakerData.FollowerID = speakerData.FollowerID or speakerData.SpeakerID
+    end
+
     self.currentSpeaker = speakerData
     
     -- ИСПРАВЛЕНИЕ: Проверяем PatronWindow напрямую, игнорируем currentWindow
