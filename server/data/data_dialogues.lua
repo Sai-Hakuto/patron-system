@@ -462,8 +462,6 @@ local Dialogues = {
 		IsPlayerOption = true,
 		Text = "Я принимаю тебя.",
 		Actions = {
-			{Type="UNLOCK_FOLLOWER", FollowerID=101},
-			{Type="ACTIVATE_FOLLOWER", FollowerID=101},
 			{Type="SET_MAJOR_NODE", NodeID=40105, PatronID=1}
 		}
 	},
@@ -533,8 +531,6 @@ local Dialogues = {
 		IsPlayerOption = true,
 		Text = "Да, пошли вместе.",
 		Actions = {
-			{Type="UNLOCK_FOLLOWER", FollowerID=102},
-			{Type="ACTIVATE_FOLLOWER", FollowerID=102},
 			{Type="SET_MAJOR_NODE", NodeID=40205, PatronID=2}
 		}
 	},
@@ -603,8 +599,6 @@ local Dialogues = {
 		IsPlayerOption = true,
 		Text = "Я стану твоим союзником.",
 		Actions = {
-			{Type="UNLOCK_FOLLOWER", FollowerID=103},
-			{Type="ACTIVATE_FOLLOWER", FollowerID=103},
 			{Type="SET_MAJOR_NODE", NodeID=40305, PatronID=3}
 		}
 	},
