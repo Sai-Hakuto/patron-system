@@ -391,31 +391,45 @@ end
 
 function PatronSystemNS.UIManager:OnDialogueUpdated(dialogueData)
     PatronSystemNS.Logger:UI("Обновление диалога: " .. (dialogueData.text or "пустой"))
-    
-    -- Проверяем, какое окно открыто и передаем диалог в соответствующее
-    if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() then
-        PatronSystemNS.Logger:UI("Передаем диалог в PatronWindow")
-        PatronSystemNS.PatronWindow:UpdateDialogue(dialogueData)
-    elseif PatronSystemNS.FollowerWindow and PatronSystemNS.FollowerWindow:IsShown() then
-        PatronSystemNS.Logger:UI("Передаем диалог в FollowerWindow")
-        PatronSystemNS.FollowerWindow:UpdateDialogue(dialogueData)
+
+    local speakerType = PatronSystemNS.DialogueEngine.currentSpeakerType
+
+    if speakerType == PatronSystemNS.Config.SpeakerType.FOLLOWER then
+        if PatronSystemNS.FollowerWindow and PatronSystemNS.FollowerWindow:IsShown() then
+            PatronSystemNS.Logger:UI("Передаем диалог в FollowerWindow")
+            PatronSystemNS.FollowerWindow:UpdateDialogue(dialogueData)
+        else
+            PatronSystemNS.Logger:Warn("FollowerWindow не открыт для отображения диалога")
+        end
     else
-        PatronSystemNS.Logger:Warn("Ни PatronWindow, ни FollowerWindow не открыты для отображения диалога")
+        if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() then
+            PatronSystemNS.Logger:UI("Передаем диалог в PatronWindow")
+            PatronSystemNS.PatronWindow:UpdateDialogue(dialogueData)
+        else
+            PatronSystemNS.Logger:Warn("PatronWindow не открыт для отображения диалога")
+        end
     end
 end
 
 function PatronSystemNS.UIManager:OnDialogueEnded()
     PatronSystemNS.Logger:UI("Диалог завершен")
-    
-    -- Проверяем, какое окно открыто и уведомляем о завершении диалога
-    if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() then
-        PatronSystemNS.Logger:UI("Уведомляем PatronWindow о завершении диалога")
-        PatronSystemNS.PatronWindow:OnDialogueEnded()
-    elseif PatronSystemNS.FollowerWindow and PatronSystemNS.FollowerWindow:IsShown() then
-        PatronSystemNS.Logger:UI("Уведомляем FollowerWindow о завершении диалога")
-        PatronSystemNS.FollowerWindow:OnDialogueEnded()
+
+    local speakerType = PatronSystemNS.DialogueEngine.currentSpeakerType
+
+    if speakerType == PatronSystemNS.Config.SpeakerType.FOLLOWER then
+        if PatronSystemNS.FollowerWindow and PatronSystemNS.FollowerWindow:IsShown() then
+            PatronSystemNS.Logger:UI("Уведомляем FollowerWindow о завершении диалога")
+            PatronSystemNS.FollowerWindow:OnDialogueEnded()
+        else
+            PatronSystemNS.Logger:UI("FollowerWindow не открыт для завершения диалога")
+        end
     else
-        PatronSystemNS.Logger:UI("Ни PatronWindow, ни FollowerWindow не открыты для завершения диалога")
+        if PatronSystemNS.PatronWindow and PatronSystemNS.PatronWindow:IsShown() then
+            PatronSystemNS.Logger:UI("Уведомляем PatronWindow о завершении диалога")
+            PatronSystemNS.PatronWindow:OnDialogueEnded()
+        else
+            PatronSystemNS.Logger:UI("PatronWindow не открыт для завершения диалога")
+        end
     end
 end
 
