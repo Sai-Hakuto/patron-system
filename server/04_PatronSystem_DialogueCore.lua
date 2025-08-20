@@ -763,6 +763,91 @@ function PatronDialogueCore.GetInitialDialogueForPatron(patronId)
     return initialNode
 end
 
+-- Получить начальный диалог для спутника
+function PatronDialogueCore.GetInitialDialogueForFollower(followerId)
+    -- Формула расчета начального узла: 40000 + (followerId - 100) * 100 + 1
+    local initialNode = 40000 + (followerId - 100) * 100 + 1
+
+    PatronLogger:Debug("DialogueCore", "GetInitialDialogueForFollower", "Calculated initial follower dialogue", {
+        follower_id = followerId,
+        initial_node = initialNode
+    })
+
+    return initialNode
+end
+
+-- Загрузить состояние диалога для спутника
+function PatronDialogueCore.LoadFollowerDialogueState(player, followerId)
+    local playerGuid = tostring(player:GetGUID())
+
+    PatronLogger:Debug("DialogueCore", "LoadFollowerDialogueState", "Loading follower dialogue state from DB", {
+        player_guid = playerGuid,
+        follower_id = followerId
+    })
+
+    local playerProgress = PatronDBManager.LoadPlayerProgress(playerGuid)
+    if not playerProgress then
+        PatronLogger:Error("DialogueCore", "LoadFollowerDialogueState", "Failed to load player progress")
+        return nil
+    end
+
+    local followerData = playerProgress.followers and playerProgress.followers[tostring(followerId)]
+    if not followerData then
+        PatronLogger:Warning("DialogueCore", "LoadFollowerDialogueState", "Follower data not found", {
+            follower_id = followerId
+        })
+        return nil
+    end
+
+    local state = {
+        currentDialogue = followerData.currentDialogue
+    }
+
+    PatronLogger:Debug("DialogueCore", "LoadFollowerDialogueState", "Follower dialogue state loaded", {
+        follower_id = followerId,
+        current_dialogue = state.currentDialogue
+    })
+
+    return state
+end
+
+-- Начать диалог со спутником
+function PatronDialogueCore.StartFollowerDialogue(player, followerId)
+    PatronLogger:Info("DialogueCore", "StartFollowerDialogue", "Starting dialogue with follower", {
+        player = player:GetName(),
+        follower_id = followerId
+    })
+
+    if not player or not followerId then
+        PatronLogger:Error("DialogueCore", "StartFollowerDialogue", "Invalid parameters")
+        return nil
+    end
+
+    local playerGuid = tostring(player:GetGUID())
+    PatronLogger:Debug("DialogueCore", "StartFollowerDialogue", "Clearing player cache", {
+        player_guid = playerGuid
+    })
+    PatronDBManager.ClearPlayerCache(playerGuid)
+
+    local dialogueState = PatronDialogueCore.LoadFollowerDialogueState(player, followerId)
+    local startNodeId
+    if dialogueState and dialogueState.currentDialogue then
+        startNodeId = dialogueState.currentDialogue
+        PatronLogger:Info("DialogueCore", "StartFollowerDialogue", "Continuing from saved node", {
+            follower_id = followerId,
+            saved_node = startNodeId
+        })
+    else
+        startNodeId = PatronDialogueCore.GetInitialDialogueForFollower(followerId)
+        PatronLogger:Info("DialogueCore", "StartFollowerDialogue", "No saved node, using initial", {
+            follower_id = followerId,
+            start_node = startNodeId
+        })
+    end
+
+    return PatronDialogueCore.ContinueDialogue(player, startNodeId)
+end
+
 -- Проверить, является ли узел MajorNode
 function PatronDialogueCore.IsMajorNode(nodeId)
     local node = PatronDialogueCore.GetDialogueNode(nodeId)
