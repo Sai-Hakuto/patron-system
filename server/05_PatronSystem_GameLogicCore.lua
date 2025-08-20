@@ -171,7 +171,7 @@ function PatronGameLogicCore.ExecuteSingleAction(action, player, playerProgress)
         result = PatronGameLogicCore.RemovePatronEvent(player, action.PatronID, action.EventName, playerProgress)
         
     elseif actionType == "SET_MAJOR_NODE" then
-        result = PatronGameLogicCore.SetMajorNode(player, action.PatronID, action.NodeID, playerProgress)
+        result = PatronGameLogicCore.SetMajorNode(player, action.PatronID, action.NodeID, playerProgress, action.FollowerID)
         
     -- БЛАГОСЛОВЕНИЯ (ПЛЕЙСХОЛДЕРЫ)
     elseif actionType == "UNLOCK_BLESSING" then
@@ -474,37 +474,75 @@ function PatronGameLogicCore.RemovePatronEvent(player, patronId, eventName, play
     return result
 end
 
--- Установить MajorNode для покровителя
-function PatronGameLogicCore.SetMajorNode(player, patronId, nodeId, playerProgress)
-    local patronKey = tostring(patronId)
-    
-    if not playerProgress.patrons[patronKey] then
-        playerProgress.patrons[patronKey] = {
-            relationshipPoints = 0,
-            events = {},
-            currentDialogue = nil
+-- Установить MajorNode для покровителя или последователя
+function PatronGameLogicCore.SetMajorNode(player, patronId, nodeId, playerProgress, followerId)
+    if patronId then
+        local patronKey = tostring(patronId)
+
+        if not playerProgress.patrons[patronKey] then
+            playerProgress.patrons[patronKey] = {
+                relationshipPoints = 0,
+                events = {},
+                currentDialogue = nil
+            }
+        end
+
+        local oldValue = playerProgress.patrons[patronKey].currentDialogue
+        playerProgress.patrons[patronKey].currentDialogue = nodeId
+
+        local result = {
+            success = true,
+            message = "Set major node " .. nodeId .. " for patron " .. patronId,
+            oldValue = oldValue,
+            newValue = nodeId,
+            action = {Type = "SET_MAJOR_NODE", PatronID = patronId, NodeID = nodeId}
         }
+
+        PatronLogger:Info("GameLogicCore", "SetMajorNode", "Major node updated for patron", {
+            player = player:GetName(),
+            patron_id = patronId,
+            old_node = oldValue,
+            new_node = nodeId
+        })
+
+        return result
+
+    elseif followerId then
+        local followerKey = tostring(followerId)
+
+        if not playerProgress.followers[followerKey] then
+            playerProgress.followers[followerKey] = {
+                isActive = false,
+                isDiscovered = false,
+                relationshipPoints = 0,
+                level = 1,
+                events = {},
+                currentDialogue = nil
+            }
+        end
+
+        local oldValue = playerProgress.followers[followerKey].currentDialogue
+        playerProgress.followers[followerKey].currentDialogue = nodeId
+
+        local result = {
+            success = true,
+            message = "Set major node " .. nodeId .. " for follower " .. followerId,
+            oldValue = oldValue,
+            newValue = nodeId,
+            action = {Type = "SET_MAJOR_NODE", FollowerID = followerId, NodeID = nodeId}
+        }
+
+        PatronLogger:Info("GameLogicCore", "SetMajorNode", "Major node updated for follower", {
+            player = player:GetName(),
+            follower_id = followerId,
+            old_node = oldValue,
+            new_node = nodeId
+        })
+
+        return result
     end
-    
-    local oldValue = playerProgress.patrons[patronKey].currentDialogue
-    playerProgress.patrons[patronKey].currentDialogue = nodeId
-    
-    local result = {
-        success = true,
-        message = "Set major node " .. nodeId .. " for patron " .. patronId,
-        oldValue = oldValue,
-        newValue = nodeId,
-        action = {Type = "SET_MAJOR_NODE", PatronID = patronId, NodeID = nodeId}
-    }
-    
-    PatronLogger:Info("GameLogicCore", "SetMajorNode", "Major node updated for patron", {
-        player = player:GetName(),
-        patron_id = patronId,
-        old_node = oldValue,
-        new_node = nodeId
-    })
-    
-    return result
+
+    return {success = false, message = "No PatronID or FollowerID provided", action = {Type = "SET_MAJOR_NODE"}}
 end
 
 -- Получить ранг отношений по очкам
@@ -797,8 +835,8 @@ function PatronGameLogicCore.ValidateActionParameters(action)
         end
     end
     
-    if action.Type == "ADD_POINTS" or action.Type == "ADD_EVENT" or 
-       action.Type == "REMOVE_EVENT" or action.Type == "SET_MAJOR_NODE" then
+    if action.Type == "ADD_POINTS" or action.Type == "ADD_EVENT" or
+       action.Type == "REMOVE_EVENT" then
         if not action.PatronID or type(action.PatronID) ~= "number" then
             PatronLogger:Warning("GameLogicCore", "ValidateActionParameters", "Invalid PatronID parameter", {
                 action_type = action.Type,
@@ -807,7 +845,7 @@ function PatronGameLogicCore.ValidateActionParameters(action)
             return false
         end
     end
-    
+
     if action.Type == "ADD_EVENT" or action.Type == "REMOVE_EVENT" then
         if not action.EventName or type(action.EventName) ~= "string" or action.EventName == "" then
             PatronLogger:Warning("GameLogicCore", "ValidateActionParameters", "Invalid EventName parameter", {
@@ -817,8 +855,17 @@ function PatronGameLogicCore.ValidateActionParameters(action)
             return false
         end
     end
-    
+
     if action.Type == "SET_MAJOR_NODE" then
+        if ((not action.PatronID or type(action.PatronID) ~= "number") and
+            (not action.FollowerID or type(action.FollowerID) ~= "number")) then
+            PatronLogger:Warning("GameLogicCore", "ValidateActionParameters", "Invalid target for SET_MAJOR_NODE", {
+                patron_id = action.PatronID,
+                follower_id = action.FollowerID
+            })
+            return false
+        end
+
         if not action.NodeID or type(action.NodeID) ~= "number" then
             PatronLogger:Warning("GameLogicCore", "ValidateActionParameters", "Invalid NodeID parameter", {
                 action_type = action.Type,
@@ -982,9 +1029,10 @@ actionStats.start_time = os.time()
 
 PatronLogger:Info("GameLogicCore", "Initialize", "Supported action types", {
     resource_actions = {"ADD_SOULS", "LOST_SOULS", "ADD_SUFFERING", "LOST_SUFFERING", "ADD_MONEY", "LOST_MONEY"},
-    patron_actions = {"ADD_POINTS", "ADD_EVENT", "REMOVE_EVENT", "SET_MAJOR_NODE"},
-    blessing_actions = {"UNLOCK_BLESSING", "REMOVE_BLESSING"},
+    patron_actions = {"ADD_POINTS", "ADD_EVENT", "REMOVE_EVENT"},
     follower_actions = {"UNLOCK_FOLLOWER", "ACTIVATE_FOLLOWER", "LEVEL_UP_FOLLOWER"},
+    dialogue_actions = {"SET_MAJOR_NODE"},
+    blessing_actions = {"UNLOCK_BLESSING", "REMOVE_BLESSING"},
     effect_actions = {"APPLY_AURA", "REMOVE_AURA", "PLAY_SOUND"},
     item_actions = {"ADD_ITEM", "REMOVE_ITEM"}
 })
