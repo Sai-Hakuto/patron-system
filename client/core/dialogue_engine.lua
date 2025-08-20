@@ -164,6 +164,8 @@ function PatronSystemNS.DialogueEngine:OnDialogueReceived(data)
     if PatronSystemNS.UIManager then
         -- БЫЛО: PatronSystemNS.UIManager:UpdateDialogue(data)
         -- СТАЛО: Используем систему событий
+        data.speakerType = self.currentSpeakerType
+        data.speakerId   = self.currentSpeakerID
         PatronSystemNS.UIManager:TriggerEvent("DialogueUpdated", data)
     end
 end
