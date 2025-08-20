@@ -461,9 +461,9 @@ local Dialogues = {
 		SpeakerID = 0,
 		IsPlayerOption = true,
 		Text = "Я принимаю тебя.",
-		Actions = {
-			{Type="SET_MAJOR_NODE", NodeID=40105, PatronID=1}
-		}
+                Actions = {
+                        {Type="SET_MAJOR_NODE", NodeID=40105, FollowerID=101}
+                }
 	},
 	[41104] = {
 		SpeakerID = 0,
@@ -530,9 +530,9 @@ local Dialogues = {
 		SpeakerID = 0,
 		IsPlayerOption = true,
 		Text = "Да, пошли вместе.",
-		Actions = {
-			{Type="SET_MAJOR_NODE", NodeID=40205, PatronID=2}
-		}
+                Actions = {
+                        {Type="SET_MAJOR_NODE", NodeID=40205, FollowerID=102}
+                }
 	},
 	[41204] = {
 		SpeakerID = 0,
@@ -598,9 +598,9 @@ local Dialogues = {
 		SpeakerID = 0,
 		IsPlayerOption = true,
 		Text = "Я стану твоим союзником.",
-		Actions = {
-			{Type="SET_MAJOR_NODE", NodeID=40305, PatronID=3}
-		}
+                Actions = {
+                        {Type="SET_MAJOR_NODE", NodeID=40305, FollowerID=103}
+                }
 	},
 	[41304] = {
 		SpeakerID = 0,
