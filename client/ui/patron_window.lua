@@ -260,6 +260,8 @@ end
 function NS.PatronWindow:UpdateSpeakerData(speakerData)
   NS.Logger:UI("Обновление данных покровителя: " .. (speakerData.Name or "Неизвестно"))
 
+  self.currentSpeakerData = speakerData
+
   local patronID = speakerData.PatronID or speakerData.SpeakerID
   self.currentPatronID = patronID or self.currentPatronID
   if self.currentPatronID then self.lastPatronID = self.currentPatronID end
@@ -345,8 +347,8 @@ function NS.PatronWindow:OnDialogueEnded()
   self:HideAllReplyButtons()
 
   local text
-  if NS.UIManager and NS.UIManager.currentSpeaker and NS.UIManager.currentSpeaker.smallTalk then
-    text = NS.UIManager.currentSpeaker.smallTalk
+  if self.currentSpeakerData and self.currentSpeakerData.smallTalk then
+    text = self.currentSpeakerData.smallTalk
   else
     text = "Выберите действие для взаимодействия с покровителем."
   end
