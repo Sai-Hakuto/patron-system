@@ -301,6 +301,8 @@ end
 function NS.FollowerWindow:UpdateSpeakerData(speakerData)
   NS.Logger:UI("Обновление данных фолловера: " .. (speakerData.Name or "Неизвестно"))
 
+  self.currentSpeakerData = speakerData
+
   local followerID = speakerData.FollowerID or speakerData.SpeakerID
   self.currentFollowerID = followerID or self.currentFollowerID
   if self.currentFollowerID then self.lastFollowerID = self.currentFollowerID end
@@ -384,8 +386,8 @@ function NS.FollowerWindow:OnDialogueEnded()
   self:HideAllReplyButtons()
 
   local text
-  if NS.UIManager and NS.UIManager.currentSpeaker and NS.UIManager.currentSpeaker.smallTalk then
-    text = NS.UIManager.currentSpeaker.smallTalk
+  if self.currentSpeakerData and self.currentSpeakerData.smallTalk then
+    text = self.currentSpeakerData.smallTalk
   else
     text = "Готов к вашим указаниям."
   end
