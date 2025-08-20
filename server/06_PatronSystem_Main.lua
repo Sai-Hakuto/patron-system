@@ -508,13 +508,22 @@ end
   ОБРАБОТЧИКИ ДИАЛОГОВ
 ============================================================================]]
 
--- Начало диалога с покровителем
-local function HandleStartDialogue(player, patronId)
+local HandleStartFollowerDialogue
+
+local function HandleStartDialogue(player, data)
+    -- Если получена таблица и указан фолловер - вызываем отдельный обработчик
+    if type(data) == "table" and data.speakerType == "follower" then
+        local followerId = data.speakerID or data.speakerId
+        return HandleStartFollowerDialogue(player, followerId)
+    end
+
+    -- Иначе обрабатываем как диалог с покровителем (старое поведение)
+    local patronId = data
     PatronLogger:Info("MainAIO", "HandleStartDialogue", "Starting dialogue with patron", {
         player = player:GetName(),
         patron_id = patronId
     })
-    
+
     local dialogueData = PatronDialogueCore.StartDialogue(player, patronId)
     if not dialogueData then
         PatronLogger:Error("MainAIO", "HandleStartDialogue", "Failed to start dialogue")
@@ -523,7 +532,26 @@ local function HandleStartDialogue(player, patronId)
         })
         return false
     end
-    
+
+    SafeSendResponse(player, "UpdateDialogue", dialogueData)
+    return true
+end
+-- Начало диалога с фолловером
+HandleStartFollowerDialogue = function(player, followerId)
+    PatronLogger:Info("MainAIO", "HandleStartFollowerDialogue", "Starting dialogue with follower", {
+        player = player:GetName(),
+        follower_id = followerId
+    })
+
+    local dialogueData = PatronDialogueCore.StartFollowerDialogue(player, followerId)
+    if not dialogueData then
+        PatronLogger:Error("MainAIO", "HandleStartFollowerDialogue", "Failed to start follower dialogue")
+        SafeSendResponse(player, "Error", {
+            message = "Не удалось начать диалог с фолловером"
+        })
+        return false
+    end
+
     SafeSendResponse(player, "UpdateDialogue", dialogueData)
     return true
 end
