@@ -600,6 +600,92 @@ function NS.BaseWindow.prototype:AttachTooltip(frame, linesBuilder)
   frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+--- Creates a horizontal bar of slot frames for items or selections.
+--- Each slot is a clickable frame with "+" text by default.
+--- opts: { size=40, gap=6, plusText="+", colorKey, onClick(index, frame), hoverColor, activeColor }
+function NS.BaseWindow.prototype:CreateSlotBar(parent, slotCount, opts)
+  opts = opts or {}
+  slotCount = slotCount or 6
+
+  local size    = opts.size or 40
+  local gap     = opts.gap or 6
+  local plusTxt = opts.plusText or "+"
+
+  local C = NS.Config:GetColor(opts.colorKey or "info")
+  local S = NS.UIStyle
+
+  local baseColor   = opts.baseColor   or { C.r * S.BASE_MULT,  C.g * S.BASE_MULT,  C.b * S.BASE_MULT,  0.8 }
+  local hoverColor  = opts.hoverColor  or { C.r * S.HOVER_MULT, C.g * S.HOVER_MULT, C.b * S.HOVER_MULT, 1.0 }
+  local activeColor = opts.activeColor or { C.r, C.g, C.b, 1.0 }
+
+  local bar = CreateFrame("Frame", self.name.."_SlotBar", parent)
+  bar:SetSize(slotCount * size + (slotCount-1) * gap, size)
+
+  local slots = {}
+
+  local function applyColor(slot, col, tcol)
+    slot:SetBackdropColor(col[1], col[2], col[3], col[4])
+    slot:SetBackdropBorderColor(C.r, C.g, C.b, 1)
+    local tc = tcol or {C.r, C.g, C.b}
+    if slot.__fs then slot.__fs:SetTextColor(tc[1], tc[2], tc[3], 1) end
+  end
+
+  for i=1, slotCount do
+    local s = CreateFrame("Button", self.name.."_Slot"..i, bar, "BackdropTemplate")
+    s:SetSize(size, size)
+    if i==1 then
+      s:SetPoint("LEFT", bar, "LEFT", 0, 0)
+    else
+      s:SetPoint("LEFT", slots[i-1], "RIGHT", gap, 0)
+    end
+
+    s:SetBackdrop({
+      bgFile="Interface\\Buttons\\WHITE8x8",
+      edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",
+      tile=false, edgeSize=12,
+      insets={left=3,right=3,top=3,bottom=3},
+    })
+
+    local fs = s:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    fs:SetPoint("CENTER")
+    fs:SetText(plusTxt)
+    s.__fs = fs
+
+    applyColor(s, baseColor)
+
+    s:EnableMouse(true)
+    s.__active = false
+
+    s:SetScript("OnEnter", function()
+      applyColor(s, hoverColor, {1,1,1})
+      if opts.onEnter then opts.onEnter(i, s) end
+    end)
+    s:SetScript("OnLeave", function()
+      if s.__active then
+        applyColor(s, activeColor, {1,1,1})
+      else
+        applyColor(s, baseColor)
+      end
+      if opts.onLeave then opts.onLeave(i, s) end
+    end)
+    s:SetScript("OnClick", function()
+      if opts.toggleActive ~= false then
+        s.__active = not s.__active
+        applyColor(s, s.__active and activeColor or baseColor, s.__active and {1,1,1} or {C.r, C.g, C.b})
+      end
+      if opts.onClick then opts.onClick(i, s) end
+    end)
+    function s:SetActive(state)
+      self.__active = state and true or false
+      applyColor(self, self.__active and activeColor or baseColor, self.__active and {1,1,1} or {C.r, C.g, C.b})
+    end
+
+    slots[i] = s
+  end
+
+  return { frame = bar, slots = slots }
+end
+
 -- ------------------------------- ВКЛАДКИ ----------------------------------
 
 --- Горизонтальные вкладки (как кнопки). tabs = { {id="WEAPON", title="Оружие"}, ... }
