@@ -99,7 +99,7 @@ function NS.BlessingWindow:Toggle(payload)
   BW.prototype.Toggle(self, payload)
 end
 
-function NS.BlessingWindow:AddBlessingToSlot(blessing)
+function NS.BlessingWindow:AddBlessingToSlot(blessing, card)
   if not self.activeBar or not self.activeBar.slots then return end
   for i, slot in ipairs(self.activeBar.slots) do
     if not slot.__blessing then
@@ -114,6 +114,18 @@ function NS.BlessingWindow:AddBlessingToSlot(blessing)
       slot.__blessing = blessing
       self.activeBlessings[i] = blessing
       slot:SetActive(true)
+
+      if card then
+        card:Disable()
+        if not card.__overlay then
+          local overlay = card:CreateTexture(nil, "OVERLAY")
+          overlay:SetAllPoints(card)
+          overlay:SetColorTexture(1, 1, 1, 0.3)
+          card.__overlay = overlay
+        end
+        card.__overlay:Show()
+      end
+
       break
     end
   end
@@ -123,11 +135,22 @@ function NS.BlessingWindow:RemoveBlessingFromSlot(index)
   if not self.activeBar or not self.activeBar.slots or not self.activeBar.slots[index] then return end
   local slot = self.activeBar.slots[index]
   if slot.__blessing then
+    local blessing = slot.__blessing
     if slot.icon then slot.icon:Hide() end
     if slot.__fs then slot.__fs:SetText("+") end
     slot.__blessing = nil
     self.activeBlessings[index] = nil
     slot:SetActive(false)
+
+    if self.cardGrid and self.cardGrid.cards then
+      for _, card in ipairs(self.cardGrid.cards) do
+        if card.__data == blessing then
+          card:Enable()
+          if card.__overlay then card.__overlay:Hide() end
+          break
+        end
+      end
+    end
   end
 end
 
@@ -144,7 +167,8 @@ function NS.BlessingWindow:RenderCategory(category)
       local fs = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
       fs:SetPoint("BOTTOM", card, "BOTTOM", 0, 6)
       fs:SetText(data.name)
-      card:SetScript("OnClick", function() self:AddBlessingToSlot(data) end)
+      card.__data = data
+      card:SetScript("OnClick", function() self:AddBlessingToSlot(data, card) end)
     end)
   end
 end
