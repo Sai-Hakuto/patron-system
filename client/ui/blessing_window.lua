@@ -6,6 +6,21 @@
 local NS = PatronSystemNS
 local BW = NS.BaseWindow
 
+local testBlessings = {
+  Defensive = {
+    { id = 1, name = "Iron Skin",  icon = "Interface\\Icons\\Spell_Shield_Strength",    type = "Defensive" },
+    { id = 2, name = "Stone Ward", icon = "Interface\\Icons\\Ability_Warrior_ShieldWall", type = "Defensive" },
+  },
+  Offensive = {
+    { id = 3, name = "Power Strike", icon = "Interface\\Icons\\Ability_Warrior_Devastate",  type = "Offensive" },
+    { id = 4, name = "Flame Wrath",  icon = "Interface\\Icons\\Spell_Fire_Immolation",      type = "Offensive" },
+  },
+  Support = {
+    { id = 5, name = "Swift Wind", icon = "Interface\\Icons\\Spell_Nature_Swiftness",   type = "Support" },
+    { id = 6, name = "Insight",    icon = "Interface\\Icons\\Spell_Holy_DivineSpirit", type = "Support" },
+  },
+}
+
 NS.BlessingWindow = BW:New("BlessingWindow", {
   windowType = NS.Config.WindowType.BLESSING,
   hooks = {
@@ -50,6 +65,18 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
         bottom = 15,
       })
 
+      self.activeBlessings = {}
+
+      for i, slot in ipairs(self.activeBar.slots) do
+        local idx = i
+        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        slot:HookScript("OnClick", function(_, button)
+          if button == "RightButton" then
+            self:RemoveBlessingFromSlot(idx)
+          end
+        end)
+      end
+
       -- Стартовая категория
       self:SelectCategory("Defensive")
     end,
@@ -73,6 +100,55 @@ function NS.BlessingWindow:Toggle(payload)
   BW.prototype.Toggle(self, payload)
 end
 
+function NS.BlessingWindow:AddBlessingToSlot(blessing)
+  if not self.activeBar then return end
+  for i, slot in ipairs(self.activeBar.slots) do
+    if not slot.__blessing then
+      if not slot.icon then
+        slot.icon = slot:CreateTexture(nil, "ARTWORK")
+        slot.icon:SetAllPoints()
+        slot.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+      end
+      slot.icon:SetTexture(blessing.icon)
+      slot.icon:Show()
+      if slot.__fs then slot.__fs:SetText("") end
+      slot.__blessing = blessing
+      self.activeBlessings[i] = blessing
+      slot:SetActive(true)
+      break
+    end
+  end
+end
+
+function NS.BlessingWindow:RemoveBlessingFromSlot(index)
+  if not self.activeBar or not self.activeBar.slots[index] then return end
+  local slot = self.activeBar.slots[index]
+  if slot.__blessing then
+    if slot.icon then slot.icon:Hide() end
+    if slot.__fs then slot.__fs:SetText("+") end
+    slot.__blessing = nil
+    self.activeBlessings[index] = nil
+    slot:SetActive(false)
+  end
+end
+
+function NS.BlessingWindow:RenderCategory(category)
+  if not self.cardGrid then return end
+  self.cardGrid:Clear()
+  for _, blessing in ipairs(testBlessings[category] or {}) do
+    self.cardGrid:AddCard(blessing, function(card, data)
+      local icon = card:CreateTexture(nil, "ARTWORK")
+      icon:SetSize(40, 40)
+      icon:SetPoint("TOPLEFT", card, "TOPLEFT", 6, -6)
+      icon:SetTexture(data.icon)
+      local fs = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      fs:SetPoint("TOPLEFT", icon, "BOTTOMLEFT", 0, -4)
+      fs:SetText(data.name)
+      card:SetScript("OnClick", function() self:AddBlessingToSlot(data) end)
+    end)
+  end
+end
+
 function NS.BlessingWindow:SelectCategory(categoryID)
   self.currentCategory = categoryID
   if self.categoryTabs and self.categoryTabs.setActive then
@@ -87,6 +163,8 @@ function NS.BlessingWindow:SelectCategory(categoryID)
   if self.elements.descText then
     self.elements.descText:SetText(descriptions[categoryID] or "Category description not available.")
   end
+
+  self:RenderCategory(categoryID)
 
   if NS.UIManager then
     NS.UIManager:ShowMessage("Категория " .. categoryID .. " выбрана (мокап)", "info")
