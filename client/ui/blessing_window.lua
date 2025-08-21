@@ -59,11 +59,10 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
       })
 
       -- ================== ПАНЕЛЬ АКТИВНЫХ БЛАГОСЛОВЕНИЙ ==================
-      self.activeBar = self:CreateSlotBar(self.frame, {
-        count = 6,
+      self.activeBar = self:CreateSlotBar(self.frame, 6, {
         title = "Active Blessings:",
-        bottom = 15,
       })
+      self.activeBar.frame:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, 15)
 
       self.activeBlessings = {}
 
@@ -101,7 +100,7 @@ function NS.BlessingWindow:Toggle(payload)
 end
 
 function NS.BlessingWindow:AddBlessingToSlot(blessing)
-  if not self.activeBar then return end
+  if not self.activeBar or not self.activeBar.slots then return end
   for i, slot in ipairs(self.activeBar.slots) do
     if not slot.__blessing then
       if not slot.icon then
@@ -121,7 +120,7 @@ function NS.BlessingWindow:AddBlessingToSlot(blessing)
 end
 
 function NS.BlessingWindow:RemoveBlessingFromSlot(index)
-  if not self.activeBar or not self.activeBar.slots[index] then return end
+  if not self.activeBar or not self.activeBar.slots or not self.activeBar.slots[index] then return end
   local slot = self.activeBar.slots[index]
   if slot.__blessing then
     if slot.icon then slot.icon:Hide() end
