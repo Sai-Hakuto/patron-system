@@ -780,6 +780,7 @@ function NS.BaseWindow.prototype:CreateCardGrid(parent, opts)
   local scroll = CreateFrame("ScrollFrame", self.name.."_CardsScroll", parent, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", left, -top)
   scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -right-22, bottom)
+  scroll.ScrollBar:Hide()
 
   local content = CreateFrame("Frame", self.name.."_CardsContent", scroll)
   content:SetSize(1, 1)
@@ -818,6 +819,7 @@ function NS.BaseWindow.prototype:CreateCardGrid(parent, opts)
     local fullH = rowsCount*cellH + (rowsCount-1)*gapY
     local fullW = cols*cellW + (cols-1)*gapX
     self.content:SetSize(fullW, fullH)
+    scroll.ScrollBar:SetShown(content:GetHeight() > scroll:GetHeight())
     return card
   end
 
