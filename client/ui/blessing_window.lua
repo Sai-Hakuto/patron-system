@@ -75,9 +75,10 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
           end
         end)
       end
+    end,
 
-      -- Стартовая категория
-      self:SelectCategory("Defensive")
+    onAfterShow = function(self)
+      self:SelectCategory(self.categoryTabs.getActive() or "Defensive")
     end,
   }
 })
@@ -169,6 +170,20 @@ function NS.BlessingWindow:RenderCategory(category)
       fs:SetText(data.name)
       card.__data = data
       card:SetScript("OnClick", function() self:AddBlessingToSlot(data, card) end)
+
+      for _, active in pairs(self.activeBlessings or {}) do
+        if active and active.id == data.id then
+          card:Disable()
+          if not card.__overlay then
+            local overlay = card:CreateTexture(nil, "OVERLAY")
+            overlay:SetAllPoints(card)
+            overlay:SetColorTexture(1, 1, 1, 0.3)
+            card.__overlay = overlay
+          end
+          card.__overlay:Show()
+          break
+        end
+      end
     end)
   end
 end
