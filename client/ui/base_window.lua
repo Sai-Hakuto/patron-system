@@ -603,9 +603,12 @@ end
 --- Creates a horizontal bar of slot frames for items or selections.
 --- Each slot is a clickable frame with "+" text by default.
 --- opts: { size=40, gap=6, plusText="+", colorKey, onClick(index, frame), hoverColor, activeColor }
-function NS.BaseWindow.prototype:CreateSlotBar(parent, slotCount, opts)
+function NS.BaseWindow.prototype:CreateSlotBar(parent, slotCount, opts, rows, cols)
   opts = opts or {}
   slotCount = slotCount or 6
+  rows = rows or 1
+  cols = cols or slotCount
+  local maxSlots = math.min(slotCount, rows * cols)
 
   local size    = opts.size or 40
   local gap     = opts.gap or 6
@@ -619,9 +622,10 @@ function NS.BaseWindow.prototype:CreateSlotBar(parent, slotCount, opts)
   local activeColor = opts.activeColor or { C.r, C.g, C.b, 1.0 }
 
   local bar = CreateFrame("Frame", self.name.."_SlotBar", parent)
-  bar:SetSize(slotCount * size + (slotCount-1) * gap, size)
+  bar:SetSize(cols * size + (cols-1) * gap, rows * size + (rows-1) * gap)
 
   local slots = {}
+  local positions = {}
 
   local function applyColor(slot, col, tcol)
     slot:SetBackdropColor(col[1], col[2], col[3], col[4])
@@ -630,14 +634,15 @@ function NS.BaseWindow.prototype:CreateSlotBar(parent, slotCount, opts)
     if slot.__fs then slot.__fs:SetTextColor(tc[1], tc[2], tc[3], 1) end
   end
 
-  for i=1, slotCount do
+  for i=1, maxSlots do
     local s = CreateFrame("Button", self.name.."_Slot"..i, bar, "BackdropTemplate")
     s:SetSize(size, size)
-    if i==1 then
-      s:SetPoint("LEFT", bar, "LEFT", 0, 0)
-    else
-      s:SetPoint("LEFT", slots[i-1], "RIGHT", gap, 0)
-    end
+
+    local colIdx = (i-1) % cols
+    local rowIdx = math.floor((i-1) / cols)
+    local x = colIdx * (size + gap)
+    local y = -rowIdx * (size + gap)
+    s:SetPoint("TOPLEFT", bar, "TOPLEFT", x, y)
 
     s:SetBackdrop({
       bgFile="Interface\\Buttons\\WHITE8x8",
@@ -681,9 +686,10 @@ function NS.BaseWindow.prototype:CreateSlotBar(parent, slotCount, opts)
     end
 
     slots[i] = s
+    positions[i] = { x = x, y = y }
   end
 
-  return { frame = bar, slots = slots }
+  return { frame = bar, slots = slots, count = maxSlots, positions = positions }
 end
 
 -- ------------------------------- ВКЛАДКИ ----------------------------------
