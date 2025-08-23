@@ -404,6 +404,76 @@ if not StartGroundAoE then
 end
 
 
+-- Generic spell helpers
+
+local function resolveGuid(guid, player)
+    if not guid or (player and guid == player:GetGUID()) then
+        return player
+    end
+    local target = GetPlayerByGUID and GetPlayerByGUID(guid) or nil
+    if not target and player and player.GetMap then
+        local map = player:GetMap()
+        if map and map.GetCreatureByGUID then
+            target = map:GetCreatureByGUID(guid)
+        end
+    end
+    return target
+end
+
+function doBuff(player, spellId, guid, cfg)
+    if not player or not spellId then return end
+    local target = resolveGuid(guid, player)
+    if not target or not target:IsInWorld() then return end
+    if not player:IsFriendlyTo(target) then return end
+    if cfg and cfg.range and player:GetDistance(target) > cfg.range then return end
+    pcall(player.CastSpell, player, target, spellId, true)
+end
+
+function doSingle(player, spellId, guid, cfg)
+    if not player or not spellId then return end
+    cfg = cfg or {}
+    local target = resolveGuid(guid, player)
+    if not target or not target:IsInWorld() then return end
+    if cfg.onlyHostile and player:IsFriendlyTo(target) then return end
+    if cfg.range and player:GetDistance(target) > cfg.range then return end
+    local bp0 = cfg.bp0 or 0
+    local bp1 = cfg.bp1 or 0
+    local bp2 = cfg.bp2 or 0
+    local triggered = cfg.triggered ~= false
+    pcall(player.CastCustomSpell, player, target, spellId, triggered, bp0, bp1, bp2)
+end
+
+function doAOE(player, aoeSpellId, guid, cfg)
+    if not player or not aoeSpellId or not cfg or not cfg.mainSpell then return end
+    cfg.radius = cfg.radius or 5
+    cfg.tickMs = cfg.tickMs or 1000
+    cfg.durationMs = cfg.durationMs or cfg.tickMs
+    local center = resolveGuid(guid, player) or player
+    if not center or not center:IsInWorld() then return end
+
+    pcall(player.CastSpellAoF, player, center:GetX(), center:GetY(), center:GetZ(), aoeSpellId, true)
+
+    local ticks = math.max(1, math.floor(cfg.durationMs / cfg.tickMs))
+    local cx, cy, cz = center:GetX(), center:GetY(), center:GetZ()
+
+    local function onTick(eventId, delay, repeats, caster)
+        if not caster or not caster:IsInWorld() then
+            if caster and caster.RemoveEventById then caster:RemoveEventById(eventId) end
+            return
+        end
+        local pdist = caster:GetDistance(cx, cy, cz) or 0
+        local searchR = math.min(120, pdist + cfg.radius + 10)
+        local pool = caster:GetUnfriendlyUnitsInRange(searchR) or {}
+        for _, unit in ipairs(pool) do
+            if unit and unit:IsInWorld() and unit:IsAlive() and (unit:GetDistance(cx, cy, cz) or 1e9) <= cfg.radius then
+                pcall(caster.CastCustomSpell, caster, unit, cfg.mainSpell, true, cfg.bp0 or 0, cfg.bp1 or 0, cfg.bp2 or 0)
+            end
+        end
+    end
+
+    player:RegisterEvent(onTick, cfg.tickMs, ticks)
+end
+
 --------------------------------------------------------------------
 
 print("[BlessingUI] Серверный обработчик BlessingsHandler загружен (С ТЕСТОВОЙ ФУНКЦИЕЙ).")
