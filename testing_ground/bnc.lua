@@ -1,215 +1,160 @@
-print("|cffFFFF00[BlessingUI] 1. Файл загружен.|r")
+-- BlessingUI.lua
+print("|cffFFFF00[BlessingUI] Клиентский файл загружен.|r")
 local AIO = AIO or require("AIO")
 
--- Custom opcode for spell requests
-local SPELL_REQ_OPCODE = 0x35F0
+------------------------------------------------------------
+-- РЕГИСТР ОБРАБОТЧИКОВ ОТ СЕРВЕРА → В КЛИЕНТ (логи и уведомления)
+------------------------------------------------------------
+local BlessingsClient = AIO.AddHandlers("blessings", {})
 
--- Serialize configuration matching server expectations
-local function serializeConfig(pkt, cfg)
-    cfg = cfg or {}
-    pkt:WriteUByte(cfg.triggered and 1 or 0)
-    pkt:WriteInt32(cfg.bp0 or 0)
-    pkt:WriteInt32(cfg.bp1 or 0)
-    pkt:WriteInt32(cfg.bp2 or 0)
-    pkt:WriteULong(cfg.castItem or 0)
-    pkt:WriteGUID(cfg.originalCaster or 0)
-    pkt:WriteUInt32(cfg.mainSpell or 0)
-    pkt:WriteFloat(cfg.radius or 0)
-    pkt:WriteUInt32(cfg.durationMs or 0)
-    pkt:WriteUInt32(cfg.tickMs or 0)
+-- Простой приемник сообщений/логов с сервера.
+-- level: "INFO" | "WARN" | "ERROR"
+function BlessingsClient.ClientLog(level, msg)
+    local prefix = "|cff33ff99[Blessings/Srv]|r "
+    level = tostring(level or "INFO")
+    msg   = tostring(msg or "")
+    if level == "ERROR" then
+        DEFAULT_CHAT_FRAME:AddMessage(prefix .. "|cffff3333[ERROR]|r " .. msg)
+        UIErrorsFrame:AddMessage(msg, 1.0, 0.1, 0.1, 1.0)
+    elseif level == "WARN" then
+        DEFAULT_CHAT_FRAME:AddMessage(prefix .. "|cffffcc00[WARN]|r " .. msg)
+        UIErrorsFrame:AddMessage(msg, 1.0, 0.6, 0.0, 1.0)
+    else
+        DEFAULT_CHAT_FRAME:AddMessage(prefix .. msg)
+    end
 end
 
--- Build and send spell packet
-local function sendSpell(reqType, visualSpellId, targetGUID, cfg)
-    local pkt = CreatePacket(SPELL_REQ_OPCODE)
-    pkt:WriteUByte(reqType or 0)
-    pkt:WriteULong(visualSpellId or 0)
-    pkt:WriteGUID(targetGUID or 0)
-    serializeConfig(pkt, cfg)
-    SendPacket(pkt)
+-- Короткий тост — просто алиас на ClientLog(INFO)
+function BlessingsClient.Toast(msg)
+    BlessingsClient.ClientLog("INFO", msg)
 end
 
--- Public wrappers
-function CastBuff(spellId, guid)
-    sendSpell(0, spellId, guid, nil)
-end
-
-function CastSingle(spellId, guid, cfg)
-    sendSpell(1, spellId, guid, cfg)
-end
-
-function CastAOE(aoeSpellId, guid, cfg)
-    sendSpell(2, aoeSpellId, guid, cfg)
-end
-
--- reqType - тип запроса: 0=CastBuff(на себя), 1=CastSingle(по цели), 2=CastAOE
--- cfg     - параметры для CastCustomSpell/AoE. Пример AoE:
---           { mainSpell = 116, radius = 8.0, durationMs = 4000, tickMs = 500 }
--- В РЕАЛЬНОЙ СИТУАЦИИ НУЖНО ЗАМЕНИТЬ НА ПРАВИЛЬНЫЕ SPELL ID ИЗ ВАШЕЙ БД СЕРВЕРА!
+------------------------------------------------------------
+-- КОНФИГ БЛЕССОВ (ID должны совпадать с сервером)
+------------------------------------------------------------
+-- type: "buff" (на себя), "single" (по цели), "aoe"
 local BlessingsConfig = {
-    -- Бафф на себя
-    { id = "blessing_power",   name = "Благословение Силы",      icon = "Interface\\Icons\\Spell_Holy_FistOfJustice",   spell_to_cast_id = 132959, reqType = 0 },
-    { id = "blessing_stamina", name = "Благословение Стойкости", icon = "Interface\\Icons\\Spell_Holy_WordFortitude",   spell_to_cast_id = 48743,  reqType = 0 },
-    -- Одиночный спелл по цели (cfg можно расширять параметрами CastCustomSpell)
-    { id = "blessing_attack",  name = "Благословение Атаки",     icon = "Interface\\Icons\\Ability_GhoulFrenzy",        spell_to_cast_id = 133,    reqType = 1 },
-    -- AoE спелл вокруг цели
-    { id = "blessing_aoe",     name = "Ливень (тест AoE)",       icon = "Interface\\Icons\\Spell_Frost_IceStorm",       spell_to_cast_id = 190356, reqType = 2,
-      cfg = { mainSpell = 116, radius = 8.0, durationMs = 4000, tickMs = 500 } },
+    { id = "blessing_power",   name = "Благословение Силы",      icon = "Interface\\Icons\\Spell_Holy_FistOfJustice",   type = "buff"  },
+    { id = "blessing_stamina", name = "Благословение Стойкости", icon = "Interface\\Icons\\Spell_Holy_WordFortitude",   type = "buff"  },
+    { id = "blessing_attack",  name = "Благословение Атаки",     icon = "Interface\\Icons\\Ability_GhoulFrenzy",        type = "single"},
+    { id = "blessing_aoe",     name = "Ливень (тест AoE)",       icon = "Interface\\Icons\\Spell_Frost_IceStorm",       type = "aoe"   },
 }
-print("[BlessingUI] 2. Конфигурация создана.")
 
-
-----------------------------------------------------
--- ГЛАВНЫЙ ФРЕЙМ АДДОНА (аналог 'frame' из Welcome Addon)
-----------------------------------------------------
+------------------------------------------------------------
+-- UI: главный фрейм и кнопка-переключатель
+------------------------------------------------------------
 local blessingMainFrame = CreateFrame("Frame", "BlessingUIMainFrame", UIParent)
--- Задаем размеры главного фрейма. Вы можете настроить их здесь.
-local mainFrameWidth = 220
-local mainFrameHeight = 110
+local mainFrameWidth, mainFrameHeight = 260, 120
 blessingMainFrame:SetSize(mainFrameWidth, mainFrameHeight)
-blessingMainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0) -- Размещаем по центру экрана
+blessingMainFrame:SetPoint("CENTER")
 blessingMainFrame:SetMovable(true)
 blessingMainFrame:EnableMouse(true)
 blessingMainFrame:RegisterForDrag("LeftButton")
 blessingMainFrame:SetScript("OnDragStart", blessingMainFrame.StartMoving)
 blessingMainFrame:SetScript("OnDragStop", blessingMainFrame.StopMovingOrSizing)
-blessingMainFrame:Hide() -- Изначально скрываем фрейм
+blessingMainFrame:Hide()
 
-print("[BlessingUI] 3. Главный фрейм 'blessingMainFrame' создан.")
+local bg = blessingMainFrame:CreateTexture(nil, "BACKGROUND")
+bg:SetAllPoints(true)
+bg:SetColorTexture(0.08, 0.08, 0.1, 0.85)
 
--- Добавляем фоновую текстуру для главного фрейма (можно использовать кастомную или простую)
-local bgTex = blessingMainFrame:CreateTexture(nil, "BACKGROUND")
-bgTex:SetAllPoints(true)
-bgTex:SetColorTexture(0.1, 0.1, 0.1, 0.8) -- Темный полупрозрачный фон
-
-
-----------------------------------------------------
--- СОДЕРЖИМОЕ ПАНЕЛИ БЛАГОСЛОВЕНИЙ (внутри главного фрейма)
-----------------------------------------------------
-
--- Заголовок панели (необязательно, но полезно)
 local title = blessingMainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-title:SetPoint("TOP", blessingMainFrame, "TOP", 0, -10)
+title:SetPoint("TOP", 0, -10)
 title:SetText("Благословения")
-title:SetTextColor(1, 0.82, 0) -- Золотистый цвет
 
--- Texture Frame для иконки игрока
-local playerPortraitTexture = blessingMainFrame:CreateTexture("BlessingUIPortraitTexture", "ARTWORK")
-playerPortraitTexture:SetSize(30, 30)
--- Позиционируем относительно blessingMainFrame
-playerPortraitTexture:SetPoint("TOPLEFT", blessingMainFrame, "TOPLEFT", 10, -50)
--- Временная заливка для отладки
-playerPortraitTexture:SetColorTexture(1, 0, 0, 0.5)
-print("[BlessingUI] PLAYER PORTRAIT TEXTURE создан.")
+-- Портрет игрока
+local playerPortrait = blessingMainFrame:CreateTexture("BlessingUIPortraitTexture", "ARTWORK")
+playerPortrait:SetSize(36, 36)
+playerPortrait:SetPoint("TOPLEFT", 10, -42)
 
--- Функция для динамического создания кнопок внутри blessingMainFrame (теперь это родитель)
-local function PopulateBlessingPanel()
-    print("[BlessingUI] 5. Начинаем заполнение панели (PopulateBlessingPanel)...")
-    local buttonSize = 36
-    local padding = 10
-    -- Начальная позиция для кнопок, учитывая портрет игрока и заголовок
-    local startX = padding + 30 + padding -- Padding + размер портрета + padding между портретом и кнопками
-    local startY = -50 -- Y-позиция (под заголовком)
-
-    for i, blessingInfo in ipairs(BlessingsConfig) do
-        local btn = CreateFrame("Button", "BlessingButton" .. i, blessingMainFrame) -- Родитель теперь blessingMainFrame
-        btn:SetSize(buttonSize, buttonSize)
-        btn:SetPoint("TOPLEFT", blessingMainFrame, "TOPLEFT", startX, startY)
-        
-        -- Улучшим внешний вид кнопок (опционально, можно использовать UIPanelButtonTemplate)
-        btn:SetNormalTexture(blessingInfo.icon) -- Иконка как нормальная текстура
-        btn:SetPushedTexture(blessingInfo.icon)
-        btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
-        btn:GetHighlightTexture():SetBlendMode("ADD")
-
-        local tex = btn:CreateTexture(nil, "ARTWORK") -- Дополнительная текстура для самой иконки, если нужно
-        tex:SetAllPoints()
-        tex:SetTexture(blessingInfo.icon) -- Задаем иконку благословения
-        
-        btn:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(blessingInfo.name, 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        -- Используем единую функцию отправки спелла
-        btn:SetScript("OnClick", function()
-            local target = blessingInfo.reqType == 0 and UnitGUID("player") or UnitGUID("target")
-            sendSpell(blessingInfo.reqType, blessingInfo.spell_to_cast_id, target, blessingInfo.cfg)
-        end)
-        
-        startX = startX + buttonSize + padding
+local function UpdatePlayerPortrait()
+    if playerPortrait then
+        -- Встроенный API: кладем портрет игрока в нашу текстуру
+        SetPortraitTexture(playerPortrait, "player")
     end
-    print("[BlessingUI] 6. Заполнение панели завершено.")
 end
 
-----------------------------------------------------
--- КНОПКА-ПЕРЕКЛЮЧАТЕЛЬ ДЛЯ ВСЕГО АДДОНА
-----------------------------------------------------
+-- Кнопка-переключатель панели
 local toggleButton = CreateFrame("Button", "BlessingToggleButton", UIParent, "UIPanelButtonTemplate")
-toggleButton:SetSize(40, 40) -- Размер кнопки, можно настроить
-toggleButton:SetPoint("TOP", UIParent, "TOP", 0, -50) -- Начальная позиция, можно перетаскивать
+toggleButton:SetSize(40, 40)
+toggleButton:SetPoint("TOP", UIParent, "TOP", 0, -50)
 toggleButton:RegisterForDrag("LeftButton")
 toggleButton:SetMovable(true)
 toggleButton:EnableMouse(true)
 toggleButton:SetScript("OnDragStart", toggleButton.StartMoving)
 toggleButton:SetScript("OnDragStop", toggleButton.StopMovingOrSizing)
-
--- Иконка для кнопки переключателя (можно использовать иконку благословений)
-toggleButton:SetNormalTexture("Interface\\Icons\\Spell_Holy_WordFortitude") -- Пример: иконка стойкости
+toggleButton:SetNormalTexture("Interface\\Icons\\Spell_Holy_WordFortitude")
 toggleButton:SetPushedTexture("Interface\\Icons\\Spell_Holy_WordFortitude")
 toggleButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
 toggleButton:GetHighlightTexture():SetBlendMode("ADD")
-
--- Тултип для кнопки
 toggleButton:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText("Панель Благословений")
     GameTooltip:Show()
 end)
-toggleButton:SetScript("OnLeave", function(self)
-    GameTooltip:Hide()
-end)
-
-
-
--- Логика переключения видимости главного фрейма
+toggleButton:SetScript("OnLeave", GameTooltip_Hide)
 toggleButton:SetScript("OnClick", function()
-    print("|cff33FF33[BlessingUI] КЛИК! Показываем/скрываем панель благословений.|r")
-    if blessingMainFrame:IsShown() then
-		AIO.Handle("blessings", "RemoveBlessing", { blessingID = "blessing_power" })
-        blessingMainFrame:Hide()
-    else
-        blessingMainFrame:Show()
-    end
+    local shown = blessingMainFrame:IsShown()
+    print("|cff33FF33[BlessingUI] Click toggle → " .. (shown and "Hide" or "Show") .. "|r")
+    if shown then blessingMainFrame:Hide() else blessingMainFrame:Show() end
 end)
-print("[BlessingUI] 7. Кнопка-переключатель видимости создана.")
 
-----------------------------------------------------
--- ИНТЕГРАЦИЯ ИКОНКИ ИГРОКА И СОБЫТИЙ
-----------------------------------------------------
-local function UpdatePlayerPortrait()
-    local portraitPath = UnitPortait("player")
-    if playerPortraitTexture then
-        if portraitPath and portraitPath ~= "" then
-            playerPortraitTexture:SetTexture(portraitPath)
-            playerPortraitTexture:SetColorTexture(1,1,1) -- Сброс цвета, если текстура загружена
-        else
-            playerPortraitTexture:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-            playerPortraitTexture:SetColorTexture(0, 0, 1, 0.5) -- Синий, если портрет не нашелся
-        end
+------------------------------------------------------------
+-- Кнопки благословений
+------------------------------------------------------------
+local function PopulateBlessingPanel()
+    print("[BlessingUI] PopulateBlessingPanel()")
+    local buttonSize, padding = 36, 10
+    local startX = 10 + 36 + 10   -- слева + ширина портрета + зазор
+    local startY = -42
+
+    for i, cfg in ipairs(BlessingsConfig) do
+        local btn = CreateFrame("Button", "BlessingButton"..i, blessingMainFrame)
+        btn:SetSize(buttonSize, buttonSize)
+        btn:SetPoint("TOPLEFT", startX + (i - 1) * (buttonSize + padding), startY)
+        btn:EnableMouse(true)
+        btn:RegisterForClicks("AnyUp")
+
+        btn:SetNormalTexture(cfg.icon)
+        btn:SetPushedTexture(cfg.icon)
+        btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+        btn:GetHighlightTexture():SetBlendMode("ADD")
+
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(cfg.name, 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", GameTooltip_Hide)
+
+        btn:SetScript("OnClick", function()
+            -- Клиентский лог нажатия:
+            print(("|cff00ff00[BlessingUI] Click: %s (%s)|r"):format(cfg.id, cfg.type))
+
+            -- Вызов серверного метода. Можно передать доп. опции, например bp0/bp1/bp2.
+            if AIO and AIO.Handle then
+                AIO.Handle("blessings", "RequestBlessing", {
+                    blessingID = cfg.id,
+                    -- пример передаваемых модификаторов (если нужно):
+                    -- bp0 = 0, bp1 = 0, bp2 = 0,
+                })
+            else
+                print("|cffff3333[BlessingUI] AIO.Handle недоступен!|r")
+            end
+        end)
     end
 end
 
+------------------------------------------------------------
+-- ИНИЦИАЛИЗАЦИЯ ПО ЛОГИНУ
+------------------------------------------------------------
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
-
-eventFrame:SetScript("OnEvent", function(self, event, ...)
+eventFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
-        PopulateBlessingPanel() -- Заполняем панель при логине, когда все фреймы готовы
         UpdatePlayerPortrait()
+        PopulateBlessingPanel()
+        print("|cffadd8e6[BlessingUI] Инициализация завершена.|r")
         self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)
-
-print("|cffadd8e6[BlessingUI] Инициализация завершена.|r")

@@ -2,13 +2,6 @@ local AIO = AIO or require("AIO")
 local json = require("dkjson")
 local BlessingsHandler = AIO.AddHandlers("blessings", {})
 
-local SPELL_REQ_OPCODE = 0x35F0
-
-local CONFIG = {
-    API_URL = "http://127.0.0.1/api.php",
-    CURL_PATH = "curl"
-}
-
 -- Конфигурация благословений на сервере
 local ServerBlessingsConfig = {
     blessing_power = {
@@ -41,16 +34,19 @@ local ServerBlessingsConfig = {
     },
 	blessing_aoe = {
 	  name = "Благословение Ливня",
+	  description = "Призывает мощный удар по площади на последней позиции врага",
 	  spell_id = 190356,            -- визуал Blizzard по земле
 	  is_offensive = true,
 	  is_aoe = true,
 	  requires_target = true,
 	  radius = 8.0,
 	  tick_ms = 500,
-	  duration_ms = 4000,
-	  damage_per_tick = 120,
-	  damage_school = 4,            -- не критично, дальше пойдём через CastCustomSpell
-	  tick_spell_id = 116,         -- <=== одноцелевой спелл для тиков (подменим bp0)
+	  duration_ms = 14000,
+	  damage_per_tick = 120, -- первый эффект
+	  damage_per_tick2 = nil, -- второй эффект
+	  damage_per_tick3 = nil, -- третий эффект
+	  damage_school = 4,            -- не критично
+	  spell_tick_id = 228599,         -- спелл для тиков
 	  cooldown_seconds = 12,
 	  cost_item_id = 500000, cost_amount = 0
 	},
@@ -58,95 +54,6 @@ local ServerBlessingsConfig = {
 
 -- Таблица для отслеживания кулдаунов по игрокам и благословениям
 local playerCooldowns = {}
-
--- Deserialize configuration parameters from the incoming message.
-local function deserializeConfig(msg)
-    local cfg = {}
-    if not msg or not msg.ReadUByte then
-        return cfg
-    end
-
-    cfg.triggered = msg:ReadUByte() ~= 0
-    cfg.bp0 = msg:ReadInt32()
-    cfg.bp1 = msg:ReadInt32()
-    cfg.bp2 = msg:ReadInt32()
-    cfg.castItem = msg:ReadULong()
-    cfg.originalCaster = msg:ReadGUID()
-
-    -- AoE specific options
-    cfg.mainSpell = msg:ReadUInt32()
-    cfg.radius = msg:ReadFloat()
-    cfg.durationMs = msg:ReadUInt32()
-    cfg.tickMs = msg:ReadUInt32()
-
-    return cfg
-end
-
--- Helper to resolve target GUID to a unit; falls back to player.
-local function resolveTarget(player, guid)
-    if not guid or guid == 0 then
-        return player
-    end
-
-    local map = player:GetMap and player:GetMap()
-    if map and map.GetWorldObject then
-        local obj = map:GetWorldObject(guid)
-        if obj then
-            return obj
-        end
-    end
-    return player
-end
-
-local function doBuff(player, visualSpellId, targetGUID, cfg)
-    local target = resolveTarget(player, targetGUID)
-    if visualSpellId and visualSpellId > 0 then
-        pcall(player.CastSpell, player, target, visualSpellId, cfg.triggered)
-    end
-end
-
-local function doSingle(player, visualSpellId, targetGUID, cfg)
-    local target = resolveTarget(player, targetGUID)
-    local spell = cfg.mainSpell or visualSpellId
-    pcall(player.CastCustomSpell, player, target, spell, cfg.triggered, cfg.bp0 or 0, cfg.bp1 or 0, cfg.bp2 or 0, cfg.castItem or 0, cfg.originalCaster)
-    if visualSpellId and visualSpellId > 0 and visualSpellId ~= spell then
-        pcall(player.CastSpell, player, target, visualSpellId, true)
-    end
-end
-
-local function doAOE(player, visualSpellId, targetGUID, cfg)
-    local target = resolveTarget(player, targetGUID)
-    StartGroundAoE(player, target, {
-        spell_id = visualSpellId,
-        radius = cfg.radius,
-        tick_ms = cfg.tickMs,
-        duration_ms = cfg.durationMs,
-        tick_spell_id = cfg.mainSpell,
-        triggered = cfg.triggered,
-        bp0 = cfg.bp0,
-        bp1 = cfg.bp1,
-        bp2 = cfg.bp2,
-        cast_item = cfg.castItem,
-        original_caster = cfg.originalCaster,
-    })
-end
-
-function BlessingsHandler.SpellRequest(player, msg)
-    local spellType = msg:ReadUByte()
-    local visualSpellId = msg:ReadULong()
-    local targetGUID = msg:ReadGUID()
-    local cfg = deserializeConfig(msg)
-
-    if spellType == 0 then
-        doBuff(player, visualSpellId, targetGUID, cfg)
-    elseif spellType == 1 then
-        doSingle(player, visualSpellId, targetGUID, cfg)
-    elseif spellType == 2 then
-        doAOE(player, visualSpellId, targetGUID, cfg)
-    end
-end
-
-AIO.AddCustomPacketHandler(SPELL_REQ_OPCODE, BlessingsHandler.SpellRequest)
 
 -- Серверная функция для запроса благословения с клиента
 function BlessingsHandler.RequestBlessing(player, data)
@@ -305,18 +212,15 @@ function BlessingsHandler.RequestBlessing(player, data)
 					tick_ms         = blessingInfo.tick_ms,
 					duration_ms     = blessingInfo.duration_ms,
 					damage_per_tick = blessingInfo.damage_per_tick,
+					damage_per_tick2 = blessingInfo.damage_per_tick2,
+					damage_per_tick3 = blessingInfo.damage_per_tick3,
 					damage_school   = blessingInfo.damage_school,
+					spell_tick_id	= blessingInfo.spell_tick_id,
 				})
 			elseif blessingInfo.damage and blessingInfo.damage > 0 then
-				-- Single-target (как у тебя работает сейчас: CastCustomSpell с fallback)
+				-- Single-target (CastCustomSpell с fallback)
 				local ok1, err1 = pcall(player.CastCustomSpell, player, finalSpellTarget,
 					blessingInfo.spell_id, true, blessingInfo.damage, 0, 0)
-				if not ok1 then
-					local school = blessingInfo.damage_school or 1
-					local ok2 = pcall(player.DealDamage, player, finalSpellTarget,
-						blessingInfo.damage, false, school, blessingInfo.spell_id)
-					if not ok2 then print("[Blessings] DealDamage fallback failed") end
-				end
 			else
 				if blessingInfo.spell_id > 0 then
 					pcall(player.CastSpell, player, finalSpellTarget, blessingInfo.spell_id, true) -- обычный визуал. :contentReference[oaicite:5]{index=5}
@@ -340,9 +244,6 @@ function BlessingsHandler.RequestBlessing(player, data)
     print("----------------------------------------------------------------")
 end
 
--- безопасные константы для DealDamage
--- Включить/выключить диагностику в лог
-
 -- Blizzard-like AoE: визуал в точке + тики урона
 if not StartGroundAoE then
   function StartGroundAoE(player, centerUnit, info)
@@ -355,15 +256,12 @@ if not StartGroundAoE then
     local radius     = tonumber(info.radius)   or 12.0
     local tickMs     = tonumber(info.tick_ms)  or 500
     local durationMs = tonumber(info.duration_ms) or 4000
-    local tickSpell  = tonumber(info.tick_spell_id) or 0
-    if tickSpell == 0 then return end
-
-    local triggered = info.triggered
-    local bp0 = tonumber(info.bp0) or 0
-    local bp1 = tonumber(info.bp1) or 0
-    local bp2 = tonumber(info.bp2) or 0
-    local castItem = info.cast_item
-    local originalCaster = info.original_caster
+    local tickSpell  = tonumber(info.tick_spell_id) or 2136
+	local dmg        = tonumber(info.damage_per_tick) or 0
+	local dmg2        = tonumber(info.damage_per_tick2) or nil
+	local dmg3        = tonumber(info.damage_per_tick3) or nil
+	local spell_tick_id        = tonumber(info.spell_tick_id) or nil
+    if dmg <= 0 then return end
 
     -- визуал по земле (мгновенно, без GCD/стоимости)
     pcall(player.CastSpellAoF, player, cx, cy, cz, spellId, true)          -- :contentReference[oaicite:2]{index=2}
@@ -390,8 +288,9 @@ if not StartGroundAoE then
       for _, u in ipairs(pool) do
         if u and u:IsInWorld() and u:IsAlive() and (u:GetDistance(cx, cy, cz) or 1e9) <= radius then
           -- ВАЖНО: self = wo (живой Player из колбэка), а не «player» из внешней области
-          local ok = pcall(wo.CastCustomSpell, wo, u, tickSpell, triggered, bp0, bp1, bp2, castItem, originalCaster)
-          if ok then hits = hits + 1 end
+          local hp1 = u:GetHealth()
+		  local ok = pcall(wo.CastCustomSpell, wo, u, spell_tick_id, true, dmg, dmg2, dmg3)
+          if ok and (hp1 - u:GetHealth()) > 0 then hits = hits + 1 end
         end
       end
 
@@ -407,76 +306,6 @@ if not StartGroundAoE then
   end
 end
 
-
--- Generic spell helpers
-
-local function resolveGuid(guid, player)
-    if not guid or (player and guid == player:GetGUID()) then
-        return player
-    end
-    local target = GetPlayerByGUID and GetPlayerByGUID(guid) or nil
-    if not target and player and player.GetMap then
-        local map = player:GetMap()
-        if map and map.GetCreatureByGUID then
-            target = map:GetCreatureByGUID(guid)
-        end
-    end
-    return target
-end
-
-function doBuff(player, spellId, guid, cfg)
-    if not player or not spellId then return end
-    local target = resolveGuid(guid, player)
-    if not target or not target:IsInWorld() then return end
-    if not player:IsFriendlyTo(target) then return end
-    if cfg and cfg.range and player:GetDistance(target) > cfg.range then return end
-    pcall(player.CastSpell, player, target, spellId, true)
-end
-
-function doSingle(player, spellId, guid, cfg)
-    if not player or not spellId then return end
-    cfg = cfg or {}
-    local target = resolveGuid(guid, player)
-    if not target or not target:IsInWorld() then return end
-    if cfg.onlyHostile and player:IsFriendlyTo(target) then return end
-    if cfg.range and player:GetDistance(target) > cfg.range then return end
-    local bp0 = cfg.bp0 or 0
-    local bp1 = cfg.bp1 or 0
-    local bp2 = cfg.bp2 or 0
-    local triggered = cfg.triggered ~= false
-    pcall(player.CastCustomSpell, player, target, spellId, triggered, bp0, bp1, bp2)
-end
-
-function doAOE(player, aoeSpellId, guid, cfg)
-    if not player or not aoeSpellId or not cfg or not cfg.mainSpell then return end
-    cfg.radius = cfg.radius or 5
-    cfg.tickMs = cfg.tickMs or 1000
-    cfg.durationMs = cfg.durationMs or cfg.tickMs
-    local center = resolveGuid(guid, player) or player
-    if not center or not center:IsInWorld() then return end
-
-    pcall(player.CastSpellAoF, player, center:GetX(), center:GetY(), center:GetZ(), aoeSpellId, true)
-
-    local ticks = math.max(1, math.floor(cfg.durationMs / cfg.tickMs))
-    local cx, cy, cz = center:GetX(), center:GetY(), center:GetZ()
-
-    local function onTick(eventId, delay, repeats, caster)
-        if not caster or not caster:IsInWorld() then
-            if caster and caster.RemoveEventById then caster:RemoveEventById(eventId) end
-            return
-        end
-        local pdist = caster:GetDistance(cx, cy, cz) or 0
-        local searchR = math.min(120, pdist + cfg.radius + 10)
-        local pool = caster:GetUnfriendlyUnitsInRange(searchR) or {}
-        for _, unit in ipairs(pool) do
-            if unit and unit:IsInWorld() and unit:IsAlive() and (unit:GetDistance(cx, cy, cz) or 1e9) <= cfg.radius then
-                pcall(caster.CastCustomSpell, caster, unit, cfg.mainSpell, true, cfg.bp0 or 0, cfg.bp1 or 0, cfg.bp2 or 0)
-            end
-        end
-    end
-
-    player:RegisterEvent(onTick, cfg.tickMs, ticks)
-end
 
 --------------------------------------------------------------------
 
