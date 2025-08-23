@@ -42,14 +42,19 @@ function CastAOE(aoeSpellId, guid, cfg)
     sendSpell(2, aoeSpellId, guid, cfg)
 end
 
--- 1. Конфигурация наших благословений
--- Я добавил примерные spell_id, которые теоретически могут дать нужный эффект
+-- reqType - тип запроса: 0=CastBuff(на себя), 1=CastSingle(по цели), 2=CastAOE
+-- cfg     - параметры для CastCustomSpell/AoE. Пример AoE:
+--           { mainSpell = 116, radius = 8.0, durationMs = 4000, tickMs = 500 }
 -- В РЕАЛЬНОЙ СИТУАЦИИ НУЖНО ЗАМЕНИТЬ НА ПРАВИЛЬНЫЕ SPELL ID ИЗ ВАШЕЙ БД СЕРВЕРА!
 local BlessingsConfig = {
-    { id = "blessing_power",   name = "Благословение Силы",      icon = "Interface\\Icons\\Spell_Holy_FistOfJustice",   spell_to_cast_id = 132959 },
-    { id = "blessing_stamina", name = "Благословение Стойкости", icon = "Interface\\Icons\\Spell_Holy_WordFortitude",   spell_to_cast_id = 48743 },
-    { id = "blessing_attack",  name = "Благословение Атаки",     icon = "Interface\\Icons\\Ability_GhoulFrenzy",        spell_to_cast_id = 133 },
-    { id = "blessing_aoe",     name = "Ливень (тест AoE)",       icon = "Interface\\Icons\\Spell_Frost_IceStorm",       spell_to_cast_id = 190356 },
+    -- Бафф на себя
+    { id = "blessing_power",   name = "Благословение Силы",      icon = "Interface\\Icons\\Spell_Holy_FistOfJustice",   spell_to_cast_id = 132959, reqType = 0 },
+    { id = "blessing_stamina", name = "Благословение Стойкости", icon = "Interface\\Icons\\Spell_Holy_WordFortitude",   spell_to_cast_id = 48743,  reqType = 0 },
+    -- Одиночный спелл по цели (cfg можно расширять параметрами CastCustomSpell)
+    { id = "blessing_attack",  name = "Благословение Атаки",     icon = "Interface\\Icons\\Ability_GhoulFrenzy",        spell_to_cast_id = 133,    reqType = 1 },
+    -- AoE спелл вокруг цели
+    { id = "blessing_aoe",     name = "Ливень (тест AoE)",       icon = "Interface\\Icons\\Spell_Frost_IceStorm",       spell_to_cast_id = 190356, reqType = 2,
+      cfg = { mainSpell = 116, radius = 8.0, durationMs = 4000, tickMs = 500 } },
 }
 print("[BlessingUI] 2. Конфигурация создана.")
 
@@ -127,16 +132,10 @@ local function PopulateBlessingPanel()
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        -- === ИЗМЕНЯЕМ ТОЛЬКО OnClick ===
+        -- Используем единую функцию отправки спелла
         btn:SetScript("OnClick", function()
-            local target = UnitGUID("target")
-            if blessingInfo.id == "blessing_attack" then
-                CastSingle(blessingInfo.spell_to_cast_id, target)
-            elseif blessingInfo.id == "blessing_aoe" then
-                CastAOE(blessingInfo.spell_to_cast_id, target, {mainSpell = 116, radius = 8.0, durationMs = 4000, tickMs = 500})
-            else
-                CastBuff(blessingInfo.spell_to_cast_id, UnitGUID("player"))
-            end
+            local target = blessingInfo.reqType == 0 and UnitGUID("player") or UnitGUID("target")
+            sendSpell(blessingInfo.reqType, blessingInfo.spell_to_cast_id, target, blessingInfo.cfg)
         end)
         
         startX = startX + buttonSize + padding
