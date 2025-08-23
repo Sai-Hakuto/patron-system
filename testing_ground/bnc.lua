@@ -1,6 +1,47 @@
 print("|cffFFFF00[BlessingUI] 1. Файл загружен.|r")
 local AIO = AIO or require("AIO")
 
+-- Custom opcode for spell requests
+local SPELL_REQ_OPCODE = 0x35F0
+
+-- Serialize configuration matching server expectations
+local function serializeConfig(pkt, cfg)
+    cfg = cfg or {}
+    pkt:WriteUByte(cfg.triggered and 1 or 0)
+    pkt:WriteInt32(cfg.bp0 or 0)
+    pkt:WriteInt32(cfg.bp1 or 0)
+    pkt:WriteInt32(cfg.bp2 or 0)
+    pkt:WriteULong(cfg.castItem or 0)
+    pkt:WriteGUID(cfg.originalCaster or 0)
+    pkt:WriteUInt32(cfg.mainSpell or 0)
+    pkt:WriteFloat(cfg.radius or 0)
+    pkt:WriteUInt32(cfg.durationMs or 0)
+    pkt:WriteUInt32(cfg.tickMs or 0)
+end
+
+-- Build and send spell packet
+local function sendSpell(reqType, visualSpellId, targetGUID, cfg)
+    local pkt = CreatePacket(SPELL_REQ_OPCODE)
+    pkt:WriteUByte(reqType or 0)
+    pkt:WriteULong(visualSpellId or 0)
+    pkt:WriteGUID(targetGUID or 0)
+    serializeConfig(pkt, cfg)
+    SendPacket(pkt)
+end
+
+-- Public wrappers
+function CastBuff(spellId, guid)
+    sendSpell(0, spellId, guid, nil)
+end
+
+function CastSingle(spellId, guid, cfg)
+    sendSpell(1, spellId, guid, cfg)
+end
+
+function CastAOE(aoeSpellId, guid, cfg)
+    sendSpell(2, aoeSpellId, guid, cfg)
+end
+
 -- 1. Конфигурация наших благословений
 -- Я добавил примерные spell_id, которые теоретически могут дать нужный эффект
 -- В РЕАЛЬНОЙ СИТУАЦИИ НУЖНО ЗАМЕНИТЬ НА ПРАВИЛЬНЫЕ SPELL ID ИЗ ВАШЕЙ БД СЕРВЕРА!
@@ -88,10 +129,15 @@ local function PopulateBlessingPanel()
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         -- === ИЗМЕНЯЕМ ТОЛЬКО OnClick ===
         btn:SetScript("OnClick", function()
-			if AIO and AIO.Handle then
-				AIO.Handle("blessings", "RequestBlessing", { blessingID = blessingInfo.id })
-			end
-		end)
+            local target = UnitGUID("target")
+            if blessingInfo.id == "blessing_attack" then
+                CastSingle(blessingInfo.spell_to_cast_id, target)
+            elseif blessingInfo.id == "blessing_aoe" then
+                CastAOE(blessingInfo.spell_to_cast_id, target, {mainSpell = 116, radius = 8.0, durationMs = 4000, tickMs = 500})
+            else
+                CastBuff(blessingInfo.spell_to_cast_id, UnitGUID("player"))
+            end
+        end)
         
         startX = startX + buttonSize + padding
     end
