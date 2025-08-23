@@ -57,6 +57,93 @@ local ServerBlessingsConfig = {
 -- Таблица для отслеживания кулдаунов по игрокам и благословениям
 local playerCooldowns = {}
 
+-- Deserialize configuration parameters from the incoming message.
+local function deserializeConfig(msg)
+    local cfg = {}
+    if not msg or not msg.ReadUByte then
+        return cfg
+    end
+
+    cfg.triggered = msg:ReadUByte() ~= 0
+    cfg.bp0 = msg:ReadInt32()
+    cfg.bp1 = msg:ReadInt32()
+    cfg.bp2 = msg:ReadInt32()
+    cfg.castItem = msg:ReadULong()
+    cfg.originalCaster = msg:ReadGUID()
+
+    -- AoE specific options
+    cfg.mainSpell = msg:ReadUInt32()
+    cfg.radius = msg:ReadFloat()
+    cfg.durationMs = msg:ReadUInt32()
+    cfg.tickMs = msg:ReadUInt32()
+
+    return cfg
+end
+
+-- Helper to resolve target GUID to a unit; falls back to player.
+local function resolveTarget(player, guid)
+    if not guid or guid == 0 then
+        return player
+    end
+
+    local map = player:GetMap and player:GetMap()
+    if map and map.GetWorldObject then
+        local obj = map:GetWorldObject(guid)
+        if obj then
+            return obj
+        end
+    end
+    return player
+end
+
+local function doBuff(player, visualSpellId, targetGUID, cfg)
+    local target = resolveTarget(player, targetGUID)
+    if visualSpellId and visualSpellId > 0 then
+        pcall(player.CastSpell, player, target, visualSpellId, cfg.triggered)
+    end
+end
+
+local function doSingle(player, visualSpellId, targetGUID, cfg)
+    local target = resolveTarget(player, targetGUID)
+    local spell = cfg.mainSpell or visualSpellId
+    pcall(player.CastCustomSpell, player, target, spell, cfg.triggered, cfg.bp0 or 0, cfg.bp1 or 0, cfg.bp2 or 0, cfg.castItem or 0, cfg.originalCaster)
+    if visualSpellId and visualSpellId > 0 and visualSpellId ~= spell then
+        pcall(player.CastSpell, player, target, visualSpellId, true)
+    end
+end
+
+local function doAOE(player, visualSpellId, targetGUID, cfg)
+    local target = resolveTarget(player, targetGUID)
+    StartGroundAoE(player, target, {
+        spell_id = visualSpellId,
+        radius = cfg.radius,
+        tick_ms = cfg.tickMs,
+        duration_ms = cfg.durationMs,
+        tick_spell_id = cfg.mainSpell,
+        triggered = cfg.triggered,
+        bp0 = cfg.bp0,
+        bp1 = cfg.bp1,
+        bp2 = cfg.bp2,
+        cast_item = cfg.castItem,
+        original_caster = cfg.originalCaster,
+    })
+end
+
+function BlessingsHandler.SpellRequest(player, msg)
+    local spellType = msg:ReadUByte()
+    local visualSpellId = msg:ReadULong()
+    local targetGUID = msg:ReadGUID()
+    local cfg = deserializeConfig(msg)
+
+    if spellType == 0 then
+        doBuff(player, visualSpellId, targetGUID, cfg)
+    elseif spellType == 1 then
+        doSingle(player, visualSpellId, targetGUID, cfg)
+    elseif spellType == 2 then
+        doAOE(player, visualSpellId, targetGUID, cfg)
+    end
+end
+
 -- Серверная функция для запроса благословения с клиента
 function BlessingsHandler.RequestBlessing(player, data)
     print("----------------------------------------------------------------")
@@ -250,10 +337,7 @@ function BlessingsHandler.RequestBlessing(player, data)
 end
 
 -- безопасные константы для DealDamage
-local SCHOOL_DIRECT = 7    -- MAX_SPELL_SCHOOL (direct)
-local SPELL_NONE    = 0
 -- Включить/выключить диагностику в лог
-local AOE_DEBUG = true
 
 -- Blizzard-like AoE: визуал в точке + тики урона
 if not StartGroundAoE then
@@ -267,10 +351,15 @@ if not StartGroundAoE then
     local radius     = tonumber(info.radius)   or 12.0
     local tickMs     = tonumber(info.tick_ms)  or 500
     local durationMs = tonumber(info.duration_ms) or 4000
-    local tickSpell  = tonumber(info.tick_spell_id) or 2136
-	local dmg        = tonumber(info.damage_per_tick) or 0
-    local SCHOOL_DIRECT = 7 -- MAX_SPELL_SCHOOL (прямой урон)
-    if dmg <= 0 then return end
+    local tickSpell  = tonumber(info.tick_spell_id) or 0
+    if tickSpell == 0 then return end
+
+    local triggered = info.triggered
+    local bp0 = tonumber(info.bp0) or 0
+    local bp1 = tonumber(info.bp1) or 0
+    local bp2 = tonumber(info.bp2) or 0
+    local castItem = info.cast_item
+    local originalCaster = info.original_caster
 
     -- визуал по земле (мгновенно, без GCD/стоимости)
     pcall(player.CastSpellAoF, player, cx, cy, cz, spellId, true)          -- :contentReference[oaicite:2]{index=2}
@@ -297,10 +386,8 @@ if not StartGroundAoE then
       for _, u in ipairs(pool) do
         if u and u:IsInWorld() and u:IsAlive() and (u:GetDistance(cx, cy, cz) or 1e9) <= radius then
           -- ВАЖНО: self = wo (живой Player из колбэка), а не «player» из внешней области
-          local hp1 = u:GetHealth()
-          --local ok  = pcall(wo.DealDamage, wo, u, dmg, false, SCHOOL_DIRECT, 0)  -- :contentReference[oaicite:6]{index=6}
-		  local ok = pcall(wo.CastCustomSpell, wo, u, 461843, true, 134, 0, 0)
-          if ok and (hp1 - u:GetHealth()) > 0 then hits = hits + 1 end
+          local ok = pcall(wo.CastCustomSpell, wo, u, tickSpell, triggered, bp0, bp1, bp2, castItem, originalCaster)
+          if ok then hits = hits + 1 end
         end
       end
 
