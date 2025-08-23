@@ -2,6 +2,8 @@ local AIO = AIO or require("AIO")
 local json = require("dkjson")
 local BlessingsHandler = AIO.AddHandlers("blessings", {})
 
+local SPELL_REQ_OPCODE = 0x35F0
+
 local CONFIG = {
     API_URL = "http://127.0.0.1/api.php",
     CURL_PATH = "curl"
@@ -143,6 +145,8 @@ function BlessingsHandler.SpellRequest(player, msg)
         doAOE(player, visualSpellId, targetGUID, cfg)
     end
 end
+
+AIO.AddCustomPacketHandler(SPELL_REQ_OPCODE, BlessingsHandler.SpellRequest)
 
 -- Серверная функция для запроса благословения с клиента
 function BlessingsHandler.RequestBlessing(player, data)
