@@ -325,10 +325,15 @@ function PatronSystemNS.DataManager:UpdatePlayerProgressCache(progressData)
         print("|cffff0000[DataManager DEBUG]|r progressData has blessings=" .. tostring(progressData.blessings ~= nil))
         if progressData.blessings then
             local count = 0
+            local inPanelCount = 0
             for k, v in pairs(progressData.blessings) do
                 count = count + 1
+                if v.isInPanel then
+                    inPanelCount = inPanelCount + 1
+                    print("|cffff0000[DataManager DEBUG]|r Blessing " .. k .. " has isInPanel=true")
+                end
             end
-            print("|cffff0000[DataManager DEBUG]|r cached blessing count=" .. count)
+            print("|cffff0000[DataManager DEBUG]|r cached blessing count=" .. count .. ", inPanel count=" .. inPanelCount)
         end
     end
     

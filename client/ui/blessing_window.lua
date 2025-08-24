@@ -75,16 +75,24 @@ function NS.BlessingWindow:Show(payload)
   
   print("|cffff0000[DEBUG]|r BlessingWindow:Show called")
   
-  -- Обновляем данные при показе окна
-  self:RefreshData()
+  -- Устанавливаем категорию по умолчанию если не задана
+  if not self.currentCategory then
+    self.currentCategory = "Defensive"
+  end
   
   -- ИСПРАВЛЕНО: Всегда загружаем состояние панели при открытии окна
   -- чтобы синхронизироваться с данными сервера
   print("|cffff0000[DEBUG]|r Always loading panel state on window open")
-  self:LoadPanelState()
+  print("|cffff0000[DEBUG]|r About to call LoadPanelState")
+  local success, err = pcall(self.LoadPanelState, self)
+  print("|cffff0000[DEBUG]|r LoadPanelState call result: success=" .. tostring(success))
+  if not success then
+    print("|cffff0000[ERROR]|r LoadPanelState error: " .. tostring(err))
+  end
 
-  -- Populate the grid after panel state is loaded
-  self:SelectCategory(self.currentCategory or "Defensive")
+  -- Обновляем данные и отображаем категорию после загрузки панели
+  self:RefreshData()
+  self:SelectCategory(self.currentCategory)
 
   print("|cffff0000[DEBUG]|r BlessingWindow:Show completed")
   
@@ -119,13 +127,24 @@ function NS.BlessingWindow:UpdateBlessingPanelOnServer(blessingId, isInPanel)
   NS.Logger:UI("Отправка обновления панели на сервер: blessing=" .. blessingId .. ", inPanel=" .. tostring(isInPanel))
 end
 
+function NS.BlessingWindow:UpdateLocalBlessingState(blessingId, isInPanel)
+  -- Обновляем локальный кэш DataManager сразу для синхронизации UI
+  if NS.DataManager and NS.DataManager:GetData() then
+    local data = NS.DataManager:GetData()
+    if data and data.blessings and data.blessings[tostring(blessingId)] then
+      data.blessings[tostring(blessingId)].isInPanel = isInPanel
+      print("|cffff0000[CACHE UPDATE]|r Blessing " .. blessingId .. " isInPanel updated to " .. tostring(isInPanel))
+    end
+  end
+end
+
 function NS.BlessingWindow:DumpBlessingStates()
   if not (NS.DataManager and NS.DataManager.GetData) then
     print("|cffff0000[PANEL DEBUG]|r DataManager not available for DumpBlessingStates")
     return
   end
 
-  local data = NS.DataManager.GetData()
+  local data = NS.DataManager:GetData()
   if not (data and data.blessings) then
     print("|cffff0000[PANEL DEBUG]|r No blessing data to dump")
     return
@@ -154,7 +173,7 @@ function NS.BlessingWindow:LoadPanelState()
   
   -- Загружаем благословения с isInPanel = true
   if NS.DataManager and NS.DataManager.GetData then
-    local data = NS.DataManager.GetData()
+    local data = NS.DataManager:GetData()
     print("|cffff0000[PANEL DEBUG]|r Got data: " .. tostring(data ~= nil))
     
     if data and data.blessings then
@@ -164,9 +183,14 @@ function NS.BlessingWindow:LoadPanelState()
       for blessingId, blessingData in pairs(data.blessings) do
         print("|cffff0000[PANEL DEBUG]|r Blessing " .. blessingId .. 
           ": isInPanel=" .. tostring(blessingData.isInPanel) .. 
-          ", isDiscovered=" .. tostring(blessingData.isDiscovered))
+          " (type=" .. type(blessingData.isInPanel) .. ")" ..
+          ", isDiscovered=" .. tostring(blessingData.isDiscovered) .. 
+          " (type=" .. type(blessingData.isDiscovered) .. ")")
           
-          if blessingData.isInPanel and blessingData.isDiscovered then
+        local shouldAdd = blessingData.isInPanel and blessingData.isDiscovered
+        print("|cffff0000[PANEL DEBUG]|r Condition result for " .. blessingId .. ": " .. tostring(shouldAdd))
+          
+        if shouldAdd then
           panelCount = panelCount + 1
           print("|cffff0000[PANEL DEBUG]|r Adding blessing " .. blessingId .. " to panel")
 
@@ -194,8 +218,13 @@ function NS.BlessingWindow:LoadPanelState()
 end
 
 function NS.BlessingWindow:AddBlessingToSlotSilent(blessing)
+  print("|cffff0000[SLOT DEBUG]|r AddBlessingToSlotSilent called for blessing " .. tostring(blessing and blessing.id))
+  
   -- Версия AddBlessingToSlot без синхронизации с сервером
-  if not self.activeBar or not self.activeBar.slots then return end
+  if not self.activeBar or not self.activeBar.slots then 
+    print("|cffff0000[SLOT DEBUG]|r No activeBar or slots available")
+    return 
+  end
   for i, slot in ipairs(self.activeBar.slots) do
     if not slot.__blessing then
       if not slot.icon then
@@ -209,6 +238,7 @@ function NS.BlessingWindow:AddBlessingToSlotSilent(blessing)
       slot.__blessing = blessing
       self.activeBlessings[i] = blessing
       slot:SetActive(true)
+      print("|cffff0000[SLOT DEBUG]|r Added blessing " .. blessing.id .. " to slot " .. i)
       break
     end
   end
@@ -276,6 +306,9 @@ function NS.BlessingWindow:AddBlessingToSlot(blessing, card)
       
       -- Синхронизируем с сервером
       self:UpdateBlessingPanelOnServer(blessing.id, true)
+      
+      -- Обновляем локальный кэш сразу для быстрого UI отклика
+      self:UpdateLocalBlessingState(blessing.id, true)
 
       break
     end
@@ -305,6 +338,9 @@ function NS.BlessingWindow:RemoveBlessingFromSlot(index)
     
     -- Синхронизируем с сервером
     self:UpdateBlessingPanelOnServer(blessing.id, false)
+    
+    -- Обновляем локальный кэш сразу для быстрого UI отклика
+    self:UpdateLocalBlessingState(blessing.id, false)
   end
 end
 
