@@ -2,68 +2,59 @@
 -- Contains static data for Blessings, with custom effect definitions.
 
 local Blessings = {
-    -- Blessing for The Void (PatronID 1) - Blessing of Stamina
-    [1001] = {
-        BlessingID = 1001,
-        PatronID = 1,
-        Name = "Благословение Стойкости (Пустота)",
-        Description = "Повышает вашу выносливость и живучесть!",
-        BlessingType = "Defensive",
-        Cooldown = 60, -- seconds
-        NeededRank = 0,
-        RequiresTarget = false, -- Does not require a target
-        Cost = {
-            Items = { {ItemID = 500000, Amount = 1} } -- ItemID 500000: Placeholder Item
-        },
-        Effect = {
-            Type = "APPLY_AURA",
-            AnimationSpellID = 48743, -- Visual spell for stamina buff
-            AuraSpellID = 48743,      -- The actual spell ID for the buff effect
-            Duration = 300            -- Aura duration in seconds (5 minutes)
-        }
-    },
-    -- Blessing for Dragon Lord (PatronID 2) - Blessing of Speed
-    [2001] = {
-        BlessingID = 2001,
-        PatronID = 2,
-        Name = "Благословение Скорости (Повелитель Драконов)",
-        Description = "Придает вам неимоверную скорость!",
-        BlessingType = "Support",
-        Cooldown = 60,
-        NeededRank = 0,
-        RequiresTarget = false,
-        Cost = {
-            Items = { {ItemID = 500000, Amount = 1} }
-        },
-        Effect = {
-            Type = "APPLY_AURA",
-            AnimationSpellID = 132959, -- Visual spell for speed buff
-            AuraSpellID = 132959,      -- The actual spell ID for the buff effect
-            Duration = 300            -- Aura duration in seconds (5 minutes)
-        }
-    },
-    -- Blessing for Eluna (PatronID 3) - Blessing of Attack
-    [3001] = {
-        BlessingID = 3001,
-        PatronID = 3,
-        Name = "Благословение Атаки (Элуна)",
-        Description = "Призывает мощный удар по врагу!",
-        BlessingType = "Offensive",
-        Cooldown = 10,
-        NeededRank = 0,
-        RequiresTarget = true, -- Requires a target to cast
-        Cost = {
-            Items = { {ItemID = 500000, Amount = 1} }
-        },
-        Effect = {
-            Type = "DAMAGE",
-            AnimationSpellID = 133,         -- Generic spell ID for visual/animation
-            Amount = 500,                   -- Base damage amount
-            School = "Shadow",              -- Damage school (Physical, Holy, Fire, Nature, Frost, Shadow, Arcane)
-            CanCrit = true,                 -- Can this damage crit?
-            DamageModifier = "SPELL_POWER"  -- Scales damage with Spell Power (NONE, ATTACK_POWER, SPELL_POWER)
-        }
-    }
+  [1001] = { -- BUFF
+    name = "Благословение Силы",
+    description = "Придает вам неимоверную силу!",
+	blessing_type = "Support",
+	blessing_id = 1001,
+    spell_id = 48743,
+    is_offensive = false, requires_target = false, is_aoe = false,
+    cooldown_seconds = 60,
+    cost_item_id = 500000, cost_amount = 0,
+  },
+
+  [1002] = { -- BUFF
+    name = "Благословение Стойкости",
+    description = "Повышает вашу выносливость и живучесть!",
+	blessing_type = "Support",
+	blessing_id = 1002,
+    spell_id = 132959,
+    is_offensive = false, requires_target = false, is_aoe = false,
+    cooldown_seconds = 20,
+    cost_item_id = 500000, cost_amount = 0,
+  },
+
+  [3001] = { -- SINGLE
+    name = "Благословение Атаки",
+    description = "Призывает мощный удар по врагу!",
+	blessing_type = "Offensive",
+	blessing_id = 3001,
+    spell_id = 133,  -- визуал (опционально)
+    is_offensive = true, requires_target = true, is_aoe = false,
+    cooldown_seconds = 10, range = 40.0,
+    cost_item_id = 500000, cost_amount = 0,
+    -- эффект урона — в какой слот bp подставлять рассчитанное значение
+    effect = 25, effect2 = nil, effect3 = nil,
+    dmg_effect = "effect",
+    currencyK = 2.9,
+  },
+
+  [3501] = { -- AOE
+    name = "Благословение Ливня",
+    description = "Призывает мощный удар по площади на последней позиции врага",
+	blessing_type = "Offensive",
+	blessing_id = 3501,
+    spell_id = 190356,          -- визуал на землю
+    spell_tick_id = 228599,     -- тик-спелл
+    is_offensive = true, is_aoe = true, requires_target = true,
+    radius = 8.0, tick_ms = 500, duration_ms = 14000,
+    cooldown_seconds = 12, range = 40.0,
+    cost_item_id = 500000, cost_amount = 0,
+    effect = 25, effect2 = nil, effect3 = nil,  -- базовая «искра»
+    dmg_effect = "effect",
+    currencyK = 2.9,
+    aoe_cap_targets = 8,
+  }
 }
 
 return Blessings
