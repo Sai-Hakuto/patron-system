@@ -6,20 +6,7 @@
 local NS = PatronSystemNS
 local BW = NS.BaseWindow
 
-local testBlessings = {
-  Defensive = {
-    { id = 1, name = "Iron Skin",  icon = "Interface\\Icons\\Spell_Shield_Strength",    type = "Defensive" },
-    { id = 2, name = "Stone Ward", icon = "Interface\\Icons\\Ability_Warrior_ShieldWall", type = "Defensive" },
-  },
-  Offensive = {
-    { id = 3, name = "Power Strike", icon = "Interface\\Icons\\Ability_Warrior_Devastate",  type = "Offensive" },
-    { id = 4, name = "Flame Wrath",  icon = "Interface\\Icons\\Spell_Fire_Immolation",      type = "Offensive" },
-  },
-  Support = {
-    { id = 5, name = "Swift Wind", icon = "Interface\\Icons\\Spell_Nature_Swiftness",   type = "Support" },
-    { id = 6, name = "Insight",    icon = "Interface\\Icons\\Spell_Holy_DivineSpirit", type = "Support" },
-  },
-}
+-- Реальные данные благословений получаются из DataManager
 
 NS.BlessingWindow = BW:New("BlessingWindow", {
   windowType = NS.Config.WindowType.BLESSING,
@@ -85,9 +72,122 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
 
 function NS.BlessingWindow:Show(payload)
   BW.prototype.Show(self, payload)
-  NS.Logger:UI("Показ окна BlessingWindow (мокап)")
+  
+  print("|cffff0000[DEBUG]|r BlessingWindow:Show called")
+  
+  -- Обновляем данные при показе окна
+  self:RefreshData()
+  
+  print("|cffff0000[DEBUG]|r BlessingWindow:Show completed")
+  
+  NS.Logger:UI("Показ окна BlessingWindow")
   if NS.UIManager then
-    NS.UIManager:ShowMessage("Окно благословений - визуальный мокап готов!", "success")
+    NS.UIManager:ShowMessage("Окно благословений открыто", "success")
+  end
+end
+
+function NS.BlessingWindow:RefreshData()
+  print("|cffff0000[DEBUG]|r RefreshData called, currentCategory=" .. tostring(self.currentCategory))
+  
+  -- Перерендериваем текущую категорию с новыми данными
+  if self.currentCategory then
+    self:SelectCategory(self.currentCategory)
+  else
+    print("|cffff0000[DEBUG]|r No currentCategory, selecting default")
+    self:SelectCategory("Defensive")
+  end
+  
+  -- Перезагружаем состояние панели
+  self:LoadPanelState()
+  
+  print("|cffff0000[DEBUG]|r RefreshData completed")
+end
+
+function NS.BlessingWindow:UpdateBlessingPanelOnServer(blessingId, isInPanel)
+  local AIO = AIO or require("AIO")
+  if not AIO then return end
+  
+  AIO.Handle(NS.ADDON_PREFIX, "UpdateBlessingPanel", {
+    blessingId = blessingId,
+    isInPanel = isInPanel
+  })
+  
+  NS.Logger:UI("Отправка обновления панели на сервер: blessing=" .. blessingId .. ", inPanel=" .. tostring(isInPanel))
+end
+
+function NS.BlessingWindow:LoadPanelState()
+  -- Очищаем текущую панель без синхронизации с сервером
+  if self.activeBar and self.activeBar.slots then
+    for i, slot in ipairs(self.activeBar.slots) do
+      if slot.__blessing then
+        self:RemoveBlessingFromSlotSilent(i)
+      end
+    end
+  end
+  
+  -- Загружаем благословения с isInPanel = true
+  if NS.DataManager and NS.DataManager.GetData then
+    local data = NS.DataManager.GetData()
+    if data and data.blessings then
+      for blessingId, blessingData in pairs(data.blessings) do
+        if blessingData.isInPanel and blessingData.isDiscovered then
+          local blessing = {
+            id = blessingData.blessing_id,
+            name = blessingData.name,
+            description = blessingData.description,
+            icon = blessingData.icon,
+            blessing_type = blessingData.blessing_type
+          }
+          -- Добавляем в панель без отправки на сервер (уже там)
+          self:AddBlessingToSlotSilent(blessing)
+        end
+      end
+    end
+  end
+end
+
+function NS.BlessingWindow:AddBlessingToSlotSilent(blessing)
+  -- Версия AddBlessingToSlot без синхронизации с сервером
+  if not self.activeBar or not self.activeBar.slots then return end
+  for i, slot in ipairs(self.activeBar.slots) do
+    if not slot.__blessing then
+      if not slot.icon then
+        slot.icon = slot:CreateTexture(nil, "ARTWORK")
+        slot.icon:SetAllPoints()
+        slot.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+      end
+      slot.icon:SetTexture(blessing.icon)
+      slot.icon:Show()
+      if slot.__fs then slot.__fs:SetText("") end
+      slot.__blessing = blessing
+      self.activeBlessings[i] = blessing
+      slot:SetActive(true)
+      break
+    end
+  end
+end
+
+function NS.BlessingWindow:RemoveBlessingFromSlotSilent(index)
+  -- Версия RemoveBlessingFromSlot без синхронизации с сервером
+  if not self.activeBar or not self.activeBar.slots or not self.activeBar.slots[index] then return end
+  local slot = self.activeBar.slots[index]
+  if slot.__blessing then
+    local blessing = slot.__blessing
+    if slot.icon then slot.icon:Hide() end
+    if slot.__fs then slot.__fs:SetText("+") end
+    slot.__blessing = nil
+    self.activeBlessings[index] = nil
+    slot:SetActive(false)
+
+    if self.cardGrid and self.cardGrid.cards then
+      for _, card in ipairs(self.cardGrid.cards) do
+        if card.__data == blessing then
+          card:Enable()
+          if card.__overlay then card.__overlay:Hide() end
+          break
+        end
+      end
+    end
   end
 end
 
@@ -126,6 +226,9 @@ function NS.BlessingWindow:AddBlessingToSlot(blessing, card)
         end
         card.__overlay:Show()
       end
+      
+      -- Синхронизируем с сервером
+      self:UpdateBlessingPanelOnServer(blessing.id, true)
 
       break
     end
@@ -152,13 +255,97 @@ function NS.BlessingWindow:RemoveBlessingFromSlot(index)
         end
       end
     end
+    
+    -- Синхронизируем с сервером
+    self:UpdateBlessingPanelOnServer(blessing.id, false)
   end
 end
 
+function NS.BlessingWindow:GetBlessingsForCategory(category)
+  print("|cffff0000[DEBUG]|r GetBlessingsForCategory called with: " .. tostring(category))
+  
+  local blessings = {}
+  
+  -- Получаем данные из DataManager
+  print("|cffff0000[DEBUG]|r DataManager exists: " .. tostring(NS.DataManager ~= nil))
+  print("|cffff0000[DEBUG]|r GetData exists: " .. tostring(NS.DataManager and NS.DataManager.GetData ~= nil))
+  
+  if NS.DataManager and NS.DataManager.GetData then
+    local success, data = pcall(NS.DataManager.GetData, NS.DataManager)
+    print("|cffff0000[DEBUG]|r GetData success: " .. tostring(success))
+    if not success then
+      print("|cffff0000[DEBUG ERROR]|r GetData failed: " .. tostring(data))
+      return blessings
+    end
+    print("|cffff0000[DEBUG]|r Got data: " .. tostring(data ~= nil))
+    
+    if data then
+      print("|cffff0000[DEBUG]|r data.blessings exists: " .. tostring(data.blessings ~= nil))
+      
+      if data.blessings then
+        local totalCount = 0
+        local discoveredCount = 0
+        local categoryCount = 0
+        
+        for blessingId, blessingData in pairs(data.blessings) do
+          totalCount = totalCount + 1
+          print("|cffff0000[DEBUG]|r Processing blessing " .. blessingId .. 
+            ", discovered=" .. tostring(blessingData.isDiscovered) ..
+            ", type=" .. tostring(blessingData.blessing_type))
+          
+          if blessingData.isDiscovered then
+            discoveredCount = discoveredCount + 1
+            
+            if blessingData.blessing_type == category then
+              categoryCount = categoryCount + 1
+              table.insert(blessings, {
+                id = blessingData.blessing_id,
+                name = blessingData.name,
+                description = blessingData.description,
+                icon = blessingData.icon,
+                blessing_type = blessingData.blessing_type,
+                isInPanel = blessingData.isInPanel
+              })
+            end
+          end
+        end
+        
+        print("|cffff0000[DEBUG]|r Blessing stats: total=" .. totalCount .. 
+          ", discovered=" .. discoveredCount .. 
+          ", category(" .. category .. ")=" .. categoryCount)
+      else
+        print("|cffff0000[DEBUG]|r No blessings in data")
+      end
+    else
+      print("|cffff0000[DEBUG]|r No data from DataManager")
+    end
+  else
+    print("|cffff0000[DEBUG]|r DataManager or GetData not available")
+  end
+  
+  -- Сортируем по ID для стабильности
+  table.sort(blessings, function(a, b) return a.id < b.id end)
+  
+  return blessings
+end
+
 function NS.BlessingWindow:RenderCategory(category)
-  if not self.cardGrid then return end
+  print("|cffff0000[DEBUG]|r RenderCategory called with: " .. tostring(category))
+  print("|cffff0000[DEBUG]|r cardGrid exists: " .. tostring(self.cardGrid ~= nil))
+  
+  if not self.cardGrid then 
+    print("|cffff0000[DEBUG]|r No cardGrid, exiting")
+    return 
+  end
+  
   self.cardGrid:Clear()
-  for _, blessing in ipairs(testBlessings[category] or {}) do
+  
+  -- Получаем данные благословений из DataManager
+  print("|cffff0000[DEBUG]|r About to call GetBlessingsForCategory")
+  local blessings = self:GetBlessingsForCategory(category)
+  print("|cffff0000[DEBUG]|r Got " .. #blessings .. " blessings")
+  
+  for _, blessing in ipairs(blessings) do
     self.cardGrid:AddCard(blessing, function(card, data)
       card:SetBackdrop(nil)
       local icon = card:CreateTexture(nil, "ARTWORK")
@@ -189,6 +376,8 @@ function NS.BlessingWindow:RenderCategory(category)
 end
 
 function NS.BlessingWindow:SelectCategory(categoryID)
+  print("|cffff0000[DEBUG]|r SelectCategory called with: " .. tostring(categoryID))
+  
   self.currentCategory = categoryID
   if self.categoryTabs and self.categoryTabs.setActive then
     self.categoryTabs.setActive(categoryID)
@@ -203,10 +392,12 @@ function NS.BlessingWindow:SelectCategory(categoryID)
     self.elements.descText:SetText(descriptions[categoryID] or "Category description not available.")
   end
 
+  print("|cffff0000[DEBUG]|r About to call RenderCategory")
   self:RenderCategory(categoryID)
+  print("|cffff0000[DEBUG]|r RenderCategory completed")
 
   if NS.UIManager then
-    NS.UIManager:ShowMessage("Категория " .. categoryID .. " выбрана (мокап)", "info")
+    NS.UIManager:ShowMessage("Категория " .. categoryID .. " выбрана", "info")
   end
 end
 

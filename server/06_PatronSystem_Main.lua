@@ -18,6 +18,25 @@ if not PatronDBManager then
     error("PatronDBManager не загружен! Загрузите 03_PatronSystem_DBManager.lua")
 end
 
+-- Загружаем данные о благословениях
+local BlessingsData = require("data.data_blessings")
+
+-- Логируем загрузку данных о благословениях
+if BlessingsData then
+    local count = 0
+    local ids = {}
+    for id, data in pairs(BlessingsData) do
+        count = count + 1
+        table.insert(ids, tostring(id))
+    end
+    PatronLogger:Info("MainAIO", "Initialize", "BlessingsData loaded", {
+        blessing_count = count,
+        blessing_ids = table.concat(ids, ", ")
+    })
+else
+    PatronLogger:Error("MainAIO", "Initialize", "Failed to load BlessingsData")
+end
+
 if not PatronDialogueCore then
     error("PatronDialogueCore не загружен! Загрузите 04_PatronSystem_DialogueCore.lua")
 end
@@ -193,9 +212,50 @@ local function BuildProgressSnapshot(playerGuid, playerProgress)
         end
     end
 
-    -- blessings: как есть (если структура уже безопасна для клиента)
+    -- blessings: обогащаем данными из data_blessings.lua
     if playerProgress and type(playerProgress.blessings) == "table" then
-        snapshot.blessings = playerProgress.blessings
+        snapshot.blessings = {}
+        PatronLogger:Info("MainAIO", "BuildProgressSnapshot", "Processing blessings", {
+            blessing_count = 0,
+            blessing_ids = {}
+        })
+        
+        local processedCount = 0
+        for blessingId, blessingFlags in pairs(playerProgress.blessings) do
+            local bId = tonumber(blessingId)
+            local blessingData = BlessingsData[bId]
+            processedCount = processedCount + 1
+            
+            PatronLogger:Info("MainAIO", "BuildProgressSnapshot", "Processing blessing", {
+                blessing_id = blessingId,
+                numeric_id = bId,
+                has_data = blessingData ~= nil,
+                flags = blessingFlags
+            })
+            
+            if blessingData then
+                snapshot.blessings[blessingId] = {
+                    isDiscovered = blessingFlags.isDiscovered or false,
+                    isInPanel = blessingFlags.isInPanel or false,
+                    -- Данные из data_blessings.lua
+                    name = blessingData.name,
+                    description = blessingData.description,
+                    icon = blessingData.icon,
+                    blessing_type = blessingData.blessing_type,
+                    blessing_id = blessingData.blessing_id
+                }
+            end
+        end
+        
+        -- Логируем итоговый результат
+        local finalBlessingCount = 0
+        for k, v in pairs(snapshot.blessings) do
+            finalBlessingCount = finalBlessingCount + 1
+        end
+        PatronLogger:Info("MainAIO", "BuildProgressSnapshot", "Final snapshot created", {
+            final_blessing_count = finalBlessingCount,
+            processed_count = processedCount
+        })
     end
 
     return snapshot
@@ -729,6 +789,27 @@ HandlePlayerChoice = function(player, choiceNodeId)
             progressData = playerProgress
         })
         
+        -- Проверяем нужна ли перезагрузка данных после разблокировки благословений
+        if actionResult.success and actionResult.results then
+            local needsDataReload = false
+            for _, result in ipairs(actionResult.results) do
+                if result.requiresDataReload then
+                    needsDataReload = true
+                    break
+                end
+            end
+            
+            if needsDataReload then
+                -- Отправляем обновленный снепшот с новыми данными благословений
+                local updatedSnapshot = CreatePlayerSnapshot(player, playerProgress)
+                SafeSendResponse(player, "DataUpdated", updatedSnapshot)
+                
+                PatronLogger:Info("Main", "ProcessChoice", "Blessing data reloaded after unlock", {
+                    player = player:GetName()
+                })
+            end
+        end
+        
         -- ИСПРАВЛЕНИЕ: Не возвращаемся сразу, проверяем есть ли следующий диалог
         if not actionResult.success then
             return false
@@ -772,6 +853,73 @@ local function HandleBlessingAction(player, data)
         success = success,
         message = message
     })
+    
+    return success
+end
+
+-- Обработка обновления панели благословений
+local function HandleUpdateBlessingPanel(player, data)
+    PatronLogger:Info("MainAIO", "HandleUpdateBlessingPanel", "Updating blessing panel", {
+        player = player:GetName(),
+        blessing_id = data.blessingId,
+        is_in_panel = data.isInPanel
+    })
+    
+    if not data.blessingId then
+        PatronLogger:Error("MainAIO", "HandleUpdateBlessingPanel", "Missing blessingId")
+        SafeSendResponse(player, "Error", {
+            message = "Отсутствует ID благословения"
+        })
+        return false
+    end
+    
+    -- Загружаем прогресс игрока
+    local playerGuid = player:GetGUIDLow()
+    local playerProgress = PatronDBManager.LoadPlayerProgress(playerGuid)
+    
+    if not playerProgress then
+        PatronLogger:Error("MainAIO", "HandleUpdateBlessingPanel", "Player data not found")
+        SafeSendResponse(player, "Error", {
+            message = "Данные игрока не найдены"
+        })
+        return false
+    end
+    
+    -- Проверяем есть ли такое благословение у игрока
+    local blessingId = tostring(data.blessingId)
+    if not playerProgress.blessings or not playerProgress.blessings[blessingId] then
+        PatronLogger:Error("MainAIO", "HandleUpdateBlessingPanel", "Blessing not unlocked", {
+            blessing_id = blessingId
+        })
+        SafeSendResponse(player, "Error", {
+            message = "Благословение не разблокировано"
+        })
+        return false
+    end
+    
+    -- Обновляем флаг isInPanel
+    playerProgress.blessings[blessingId].isInPanel = data.isInPanel or false
+    
+    -- Сохраняем в БД
+    local success = PatronDBManager.SavePlayerProgress(playerGuid, playerProgress)
+    
+    if success then
+        PatronLogger:Info("MainAIO", "HandleUpdateBlessingPanel", "Panel updated successfully", {
+            blessing_id = blessingId,
+            is_in_panel = playerProgress.blessings[blessingId].isInPanel
+        })
+        
+        SafeSendResponse(player, "BlessingPanelUpdated", {
+            success = true,
+            blessingId = data.blessingId,
+            isInPanel = playerProgress.blessings[blessingId].isInPanel
+        })
+    else
+        PatronLogger:Error("MainAIO", "HandleUpdateBlessingPanel", "Failed to save blessing panel state")
+        SafeSendResponse(player, "Error", {
+            message = "Не удалось сохранить состояние панели"
+        })
+    end
     
     return success
 end
@@ -883,6 +1031,7 @@ AIO.AddHandlers(ADDON_PREFIX, {
     --=== ДЕЙСТВИЯ ===--
     BlessingAction = CreateSafeHandler("BlessingAction", HandleBlessingAction),
     PrayerAction = CreateSafeHandler("PrayerAction", HandlePrayerAction),
+    UpdateBlessingPanel = CreateSafeHandler("UpdateBlessingPanel", HandleUpdateBlessingPanel),
     
     --=== SMALLTALK ===--
     RefreshSmallTalk = CreateSafeHandler("RefreshSmallTalk", HandleRefreshSmallTalk),

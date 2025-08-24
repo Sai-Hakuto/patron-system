@@ -319,12 +319,43 @@ end
 function PatronSystemNS.DataManager:UpdatePlayerProgressCache(progressData)
     -- Сохраняем прогресс в специальном кэше
     self.playerProgressCache = progressData
+    
+    print("|cffff0000[DataManager DEBUG]|r UpdatePlayerProgressCache called")
+    if progressData then
+        print("|cffff0000[DataManager DEBUG]|r progressData has blessings=" .. tostring(progressData.blessings ~= nil))
+        if progressData.blessings then
+            local count = 0
+            for k, v in pairs(progressData.blessings) do
+                count = count + 1
+            end
+            print("|cffff0000[DataManager DEBUG]|r cached blessing count=" .. count)
+        end
+    end
+    
     PatronSystemNS.Logger:Data("Кэш прогресса игрока обновлен")
 end
 
 -- Получить прогресс игрока из кэша
 function PatronSystemNS.DataManager:GetPlayerProgress()
+    print("|cffff0000[DataManager DEBUG]|r GetPlayerProgress called, cache=" .. tostring(self.playerProgressCache ~= nil))
     return self.playerProgressCache
+end
+
+-- Получить все данные (алиас для GetPlayerProgress для совместимости)
+function PatronSystemNS.DataManager:GetData()
+    local data = self:GetPlayerProgress()
+    print("|cffff0000[DataManager DEBUG]|r GetData called, data=" .. tostring(data ~= nil))
+    if data then
+        print("|cffff0000[DataManager DEBUG]|r data has blessings=" .. tostring(data.blessings ~= nil))
+        if data.blessings then
+            local count = 0
+            for k, v in pairs(data.blessings) do
+                count = count + 1
+            end
+            print("|cffff0000[DataManager DEBUG]|r blessing count=" .. count)
+        end
+    end
+    return data
 end
 
 -- Получить данные покровителя с учетом прогресса

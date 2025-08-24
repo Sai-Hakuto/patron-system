@@ -571,15 +571,15 @@ function PatronGameLogicCore.UnlockBlessing(player, blessingId, playerProgress)
     end
     
     playerProgress.blessings[tostring(blessingId)] = {
-        isActive = false,
-        isInPanel = false,
-        lastUsed = nil
+        isDiscovered = false,
+        isInPanel = false
     }
     
     return {
         success = true,
         message = "Blessing " .. blessingId .. " unlocked (PLACEHOLDER)",
-        action = {Type = "UNLOCK_BLESSING", BlessingID = blessingId}
+        action = {Type = "UNLOCK_BLESSING", BlessingID = blessingId},
+        requiresDataReload = true  -- Флаг для обновления кэша на клиенте
     }
 end
 

@@ -166,7 +166,23 @@ local function RegisterAIOHandlers()
 			-- Сохраняем прогресс в DataManager
 			if data.progressData then
 				PatronSystemNS.DataManager:UpdatePlayerProgressCache(data.progressData)
-				PatronSystemNS.Logger:Info("Кэш игрока обновлен: souls=" .. (data.progressData.souls or 0) .. ", suffering=" .. (data.progressData.suffering or 0))
+				
+				-- Логируем данные благословений
+				local blessingCount = 0
+				local blessingIds = {}
+				if data.progressData.blessings then
+					for id, blessing in pairs(data.progressData.blessings) do
+						blessingCount = blessingCount + 1
+						table.insert(blessingIds, id)
+					end
+				end
+				
+				PatronSystemNS.Logger:Info("Кэш игрока обновлен: souls=" .. (data.progressData.souls or 0) .. 
+					", suffering=" .. (data.progressData.suffering or 0) .. 
+					", blessings=" .. blessingCount .. 
+					" [" .. table.concat(blessingIds, ", ") .. "]")
+			else
+				PatronSystemNS.Logger:Error("Данные прогресса отсутствуют в PlayerInitialized")
 			end
 			
 			-- Показываем приветственное сообщение
@@ -251,6 +267,30 @@ local function RegisterAIOHandlers()
 				end
 			end
 		end,
+		
+		-- НОВОЕ: Обработчик обновления данных после разблокировки благословений
+		DataUpdated = function(_, data)
+			PatronSystemNS.Logger:AIO("Получено обновление данных после изменений")
+			
+			-- Обновляем кэш в DataManager
+			if PatronSystemNS.DataManager and data then
+				PatronSystemNS.DataManager:UpdatePlayerProgressCache(data)
+				PatronSystemNS.Logger:Info("Кэш данных обновлен")
+			end
+			
+			-- Триггерим событие для обновления UI
+			EventDispatcher:TriggerEvent("DataUpdated", data)
+		end,
+		
+		-- НОВОЕ: Ответ на обновление панели благословений
+		BlessingPanelUpdated = function(_, data)
+			PatronSystemNS.Logger:AIO("Панель благословений обновлена: " .. tostring(data.success))
+			
+			if data.success then
+				PatronSystemNS.Logger:Info("Благословение " .. data.blessingId .. " " .. 
+					(data.isInPanel and "добавлено в панель" or "убрано из панели"))
+			end
+		end,
         
         -- ТЕСТОВЫЕ ОТВЕТЫ
         TestResponse = function(_, message)
@@ -314,6 +354,17 @@ local function RegisterModuleListeners()
     EventDispatcher:RegisterListener("SmallTalkRefreshed", "SmallTalkHandler", function(data)
         local t = data.patronId and "patron" or (data.followerId and "follower" or "unknown")
         PatronSystemNS.Logger:Info("SmallTalk refresh event processed for " .. t .. ": " .. (data.patronId or data.followerId or "unknown"))
+    end)
+    
+    -- НОВОЕ: Слушатель для обновления данных благословений
+    EventDispatcher:RegisterListener("DataUpdated", "BlessingWindow", function(data)
+        PatronSystemNS.Logger:Info("Обновление данных получено - обновляем окно благословений")
+        
+        -- Обновляем окно благословений если оно открыто
+        if PatronSystemNS.BlessingWindow and PatronSystemNS.BlessingWindow:IsShown() then
+            PatronSystemNS.BlessingWindow:RefreshData()
+            PatronSystemNS.Logger:Info("Окно благословений обновлено")
+        end
     end)
     
     PatronSystemNS.Logger:Info("Слушатели модулей зарегистрированы (ИСПРАВЛЕНИЕ)Этап 5")
