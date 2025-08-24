@@ -65,6 +65,7 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
     end,
 
     onAfterShow = function(self)
+      -- Select the active tab (or default) when the window becomes visible
       self:SelectCategory(self.categoryTabs.getActive() or "Defensive")
     end,
   }
@@ -93,17 +94,16 @@ end
 
 function NS.BlessingWindow:RefreshData()
   print("|cffff0000[DEBUG]|r RefreshData called, currentCategory=" .. tostring(self.currentCategory))
-  
-  -- Перерендериваем текущую категорию с новыми данными
+
+  -- Если категория уже выбрана, просто перерисовываем её
   if self.currentCategory then
-    self:SelectCategory(self.currentCategory)
+    self:RenderCategory(self.currentCategory)
   else
-    print("|cffff0000[DEBUG]|r No currentCategory, selecting default")
-    self:SelectCategory("Defensive")
+    print("|cffff0000[DEBUG]|r No currentCategory set, skipping selection")
   end
-  
+
   -- НЕ перезагружаем состояние панели здесь - это сбрасывает локальные изменения
-  
+
   print("|cffff0000[DEBUG]|r RefreshData completed")
 end
 
@@ -170,7 +170,9 @@ function NS.BlessingWindow:LoadPanelState()
   end
 
   -- Перерисовываем текущую категорию, чтобы обновить сетку
-  self:RenderCategory(self.currentCategory)
+  if self.currentCategory then
+    self:RenderCategory(self.currentCategory)
+  end
 
   print("|cffff0000[PANEL DEBUG]|r LoadPanelState completed")
 end
