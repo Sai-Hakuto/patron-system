@@ -78,6 +78,11 @@ function NS.BlessingWindow:Show(payload)
   -- Обновляем данные при показе окна
   self:RefreshData()
   
+  -- ИСПРАВЛЕНО: Всегда загружаем состояние панели при открытии окна
+  -- чтобы синхронизироваться с данными сервера
+  print("|cffff0000[DEBUG]|r Always loading panel state on window open")
+  self:LoadPanelState()
+  
   print("|cffff0000[DEBUG]|r BlessingWindow:Show completed")
   
   NS.Logger:UI("Показ окна BlessingWindow")
@@ -97,8 +102,7 @@ function NS.BlessingWindow:RefreshData()
     self:SelectCategory("Defensive")
   end
   
-  -- Перезагружаем состояние панели
-  self:LoadPanelState()
+  -- НЕ перезагружаем состояние панели здесь - это сбрасывает локальные изменения
   
   print("|cffff0000[DEBUG]|r RefreshData completed")
 end
@@ -116,6 +120,8 @@ function NS.BlessingWindow:UpdateBlessingPanelOnServer(blessingId, isInPanel)
 end
 
 function NS.BlessingWindow:LoadPanelState()
+  print("|cffff0000[PANEL DEBUG]|r LoadPanelState called")
+  
   -- Очищаем текущую панель без синхронизации с сервером
   if self.activeBar and self.activeBar.slots then
     for i, slot in ipairs(self.activeBar.slots) do
@@ -128,9 +134,21 @@ function NS.BlessingWindow:LoadPanelState()
   -- Загружаем благословения с isInPanel = true
   if NS.DataManager and NS.DataManager.GetData then
     local data = NS.DataManager.GetData()
+    print("|cffff0000[PANEL DEBUG]|r Got data: " .. tostring(data ~= nil))
+    
     if data and data.blessings then
+      print("|cffff0000[PANEL DEBUG]|r Found blessings, checking isInPanel...")
+      local panelCount = 0
+      
       for blessingId, blessingData in pairs(data.blessings) do
+        print("|cffff0000[PANEL DEBUG]|r Blessing " .. blessingId .. 
+          ": isInPanel=" .. tostring(blessingData.isInPanel) .. 
+          ", isDiscovered=" .. tostring(blessingData.isDiscovered))
+          
         if blessingData.isInPanel and blessingData.isDiscovered then
+          panelCount = panelCount + 1
+          print("|cffff0000[PANEL DEBUG]|r Adding blessing " .. blessingId .. " to panel")
+          
           local blessing = {
             id = blessingData.blessing_id,
             name = blessingData.name,
@@ -142,8 +160,16 @@ function NS.BlessingWindow:LoadPanelState()
           self:AddBlessingToSlotSilent(blessing)
         end
       end
+      
+      print("|cffff0000[PANEL DEBUG]|r Total blessings added to panel: " .. panelCount)
+    else
+      print("|cffff0000[PANEL DEBUG]|r No blessing data found")
     end
+  else
+    print("|cffff0000[PANEL DEBUG]|r DataManager not available")
   end
+  
+  print("|cffff0000[PANEL DEBUG]|r LoadPanelState completed")
 end
 
 function NS.BlessingWindow:AddBlessingToSlotSilent(blessing)

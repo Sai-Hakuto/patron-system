@@ -874,7 +874,7 @@ local function HandleUpdateBlessingPanel(player, data)
     end
     
     -- Загружаем прогресс игрока
-    local playerGuid = player:GetGUIDLow()
+    local playerGuid = tostring(player:GetGUID())
     local playerProgress = PatronDBManager.LoadPlayerProgress(playerGuid)
     
     if not playerProgress then

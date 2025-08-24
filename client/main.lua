@@ -363,7 +363,10 @@ local function RegisterModuleListeners()
         -- Обновляем окно благословений если оно открыто
         if PatronSystemNS.BlessingWindow and PatronSystemNS.BlessingWindow:IsShown() then
             PatronSystemNS.BlessingWindow:RefreshData()
-            PatronSystemNS.Logger:Info("Окно благословений обновлено")
+            
+            -- При обновлении данных с сервера - перезагружаем состояние панели
+            PatronSystemNS.BlessingWindow:LoadPanelState()
+            PatronSystemNS.Logger:Info("Окно благословений и панель обновлены")
         end
     end)
     
