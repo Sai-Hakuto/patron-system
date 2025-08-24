@@ -344,6 +344,16 @@ function NS.BlessingWindow:RemoveBlessingFromSlot(index)
   end
 end
 
+function NS.BlessingWindow:RemoveBlessingById(blessingId)
+  if not self.activeBlessings then return end
+  for index, blessing in pairs(self.activeBlessings) do
+    if blessing and blessing.id == blessingId then
+      self:RemoveBlessingFromSlot(index)
+      break
+    end
+  end
+end
+
 function NS.BlessingWindow:GetBlessingsForCategory(category)
   print("|cffff0000[DEBUG]|r GetBlessingsForCategory called with: " .. tostring(category))
   
@@ -439,7 +449,14 @@ function NS.BlessingWindow:RenderCategory(category)
       fs:SetPoint("BOTTOM", card, "BOTTOM", 0, 6)
       fs:SetText(data.name)
       card.__data = data
-      card:SetScript("OnClick", function() self:AddBlessingToSlot(data, card) end)
+      card:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+      card:SetScript("OnClick", function(_, button)
+        if button == "LeftButton" then
+          self:AddBlessingToSlot(data, card)
+        elseif button == "RightButton" then
+          self:RemoveBlessingById(data.id)
+        end
+      end)
 
       for _, active in pairs(self.activeBlessings or {}) do
         if active and active.id == data.id then
