@@ -258,7 +258,7 @@ function NS.BlessingWindow:RemoveBlessingFromSlotSilent(index)
 
     if self.cardGrid and self.cardGrid.cards then
       for _, card in ipairs(self.cardGrid.cards) do
-        if card.__data == blessing then
+        if card.__data and card.__data.id == blessing.id then
           card:Enable()
           if card.__overlay then card.__overlay:Hide() end
           break
@@ -328,7 +328,7 @@ function NS.BlessingWindow:RemoveBlessingFromSlot(index)
 
     if self.cardGrid and self.cardGrid.cards then
       for _, card in ipairs(self.cardGrid.cards) do
-        if card.__data == blessing then
+        if card.__data and card.__data.id == blessing.id then
           card:Enable()
           if card.__overlay then card.__overlay:Hide() end
           break
