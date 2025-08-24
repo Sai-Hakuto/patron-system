@@ -119,8 +119,29 @@ function NS.BlessingWindow:UpdateBlessingPanelOnServer(blessingId, isInPanel)
   NS.Logger:UI("Отправка обновления панели на сервер: blessing=" .. blessingId .. ", inPanel=" .. tostring(isInPanel))
 end
 
+function NS.BlessingWindow:DumpBlessingStates()
+  if not (NS.DataManager and NS.DataManager.GetData) then
+    print("|cffff0000[PANEL DEBUG]|r DataManager not available for DumpBlessingStates")
+    return
+  end
+
+  local data = NS.DataManager.GetData()
+  if not (data and data.blessings) then
+    print("|cffff0000[PANEL DEBUG]|r No blessing data to dump")
+    return
+  end
+
+  print("|cffff0000[PANEL DEBUG]|r Dumping blessing states:")
+  for blessingId, blessingData in pairs(data.blessings) do
+    local unlocked = blessingData.isDiscovered and "UNLOCKED" or "LOCKED"
+    local inPanel = blessingData.isInPanel and "IN PANEL" or "NOT IN PANEL"
+    print("|cffff0000[PANEL DEBUG]|r Blessing " .. blessingId .. ": " .. unlocked .. ", " .. inPanel)
+  end
+end
+
 function NS.BlessingWindow:LoadPanelState()
   print("|cffff0000[PANEL DEBUG]|r LoadPanelState called")
+  self:DumpBlessingStates()
   
   -- Очищаем текущую панель без синхронизации с сервером
   if self.activeBar and self.activeBar.slots then
