@@ -133,9 +133,9 @@ function NS.BlessingWindow:DumpBlessingStates()
 
   print("|cffff0000[PANEL DEBUG]|r Dumping blessing states:")
   for blessingId, blessingData in pairs(data.blessings) do
-    local unlocked = blessingData.isDiscovered and "UNLOCKED" or "LOCKED"
-    local inPanel = blessingData.isInPanel and "IN PANEL" or "NOT IN PANEL"
-    print("|cffff0000[PANEL DEBUG]|r Blessing " .. blessingId .. ": " .. unlocked .. ", " .. inPanel)
+    print("|cffff0000[PANEL DEBUG]|r Blessing " .. blessingId ..
+      ": isDiscovered=" .. tostring(blessingData.isDiscovered) ..
+      ", isInPanel=" .. tostring(blessingData.isInPanel))
   end
 end
 
