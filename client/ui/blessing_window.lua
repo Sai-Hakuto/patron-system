@@ -145,12 +145,12 @@ function NS.BlessingWindow:LoadPanelState()
           ": isInPanel=" .. tostring(blessingData.isInPanel) .. 
           ", isDiscovered=" .. tostring(blessingData.isDiscovered))
           
-        if blessingData.isInPanel and blessingData.isDiscovered then
+          if blessingData.isInPanel and blessingData.isDiscovered then
           panelCount = panelCount + 1
           print("|cffff0000[PANEL DEBUG]|r Adding blessing " .. blessingId .. " to panel")
-          
+
           local blessing = {
-            id = blessingData.blessing_id,
+            id = tonumber(blessingId),
             name = blessingData.name,
             description = blessingData.description,
             icon = blessingData.icon,
@@ -168,7 +168,10 @@ function NS.BlessingWindow:LoadPanelState()
   else
     print("|cffff0000[PANEL DEBUG]|r DataManager not available")
   end
-  
+
+  -- Перерисовываем текущую категорию, чтобы обновить сетку
+  self:RenderCategory(self.currentCategory)
+
   print("|cffff0000[PANEL DEBUG]|r LoadPanelState completed")
 end
 
