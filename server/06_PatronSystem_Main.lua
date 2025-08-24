@@ -244,6 +244,10 @@ local function BuildProgressSnapshot(playerGuid, playerProgress)
                     blessing_type = blessingData.blessing_type,
                     blessing_id = blessingData.blessing_id
                 }
+                PatronLogger:Debug("MainAIO", "BuildProgressSnapshot", "Blessing panel state", {
+                    blessing_id = blessingId,
+                    isInPanel = snapshot.blessings[blessingId].isInPanel
+                })
             end
         end
         
