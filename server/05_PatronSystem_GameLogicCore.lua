@@ -572,7 +572,8 @@ function PatronGameLogicCore.UnlockBlessing(player, blessingId, playerProgress)
     
     playerProgress.blessings[tostring(blessingId)] = {
         isDiscovered = false,
-        isInPanel = false
+        isInPanel = false,
+        panelSlot = 0
     }
     
     return {

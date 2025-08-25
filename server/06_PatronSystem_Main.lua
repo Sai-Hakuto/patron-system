@@ -237,6 +237,7 @@ local function BuildProgressSnapshot(playerGuid, playerProgress)
                 snapshot.blessings[blessingId] = {
                     isDiscovered = blessingFlags.isDiscovered or false,
                     isInPanel = blessingFlags.isInPanel or false,
+                    panelSlot = blessingFlags.panelSlot or 0,
                     -- Данные из data_blessings.lua
                     name = blessingData.name,
                     description = blessingData.description,
@@ -866,7 +867,8 @@ local function HandleUpdateBlessingPanel(player, data)
     PatronLogger:Info("MainAIO", "HandleUpdateBlessingPanel", "Updating blessing panel", {
         player = player:GetName(),
         blessing_id = data.blessingId,
-        is_in_panel = data.isInPanel
+        is_in_panel = data.isInPanel,
+        panel_slot = data.panelSlot
     })
     
     if not data.blessingId then
@@ -901,8 +903,11 @@ local function HandleUpdateBlessingPanel(player, data)
         return false
     end
     
-    -- Обновляем флаг isInPanel
+    -- Обновляем флаг isInPanel и позицию в панели
     playerProgress.blessings[blessingId].isInPanel = data.isInPanel or false
+    if data.panelSlot then
+        playerProgress.blessings[blessingId].panelSlot = data.panelSlot
+    end
     
     -- Сохраняем в БД
     local success = PatronDBManager.SavePlayerProgress(playerGuid, playerProgress)
@@ -910,7 +915,8 @@ local function HandleUpdateBlessingPanel(player, data)
     if success then
         PatronLogger:Info("MainAIO", "HandleUpdateBlessingPanel", "Panel updated successfully", {
             blessing_id = blessingId,
-            is_in_panel = playerProgress.blessings[blessingId].isInPanel
+            is_in_panel = playerProgress.blessings[blessingId].isInPanel,
+            panel_slot = playerProgress.blessings[blessingId].panelSlot
         })
         
         SafeSendResponse(player, "BlessingPanelUpdated", {
