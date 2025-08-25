@@ -257,16 +257,17 @@ function NS.BlessingWindow:RemoveBlessingFromSlotSilent(index)
     slot:SetActive(false)
 
     if self.cardGrid and self.cardGrid.cards then
-      for _, card in ipairs(self.cardGrid.cards) do
-        if card.__data and card.__data.id == blessing.id then
-          card:Enable()
-          if card.__overlay then card.__overlay:Hide() end
-          break
+        for _, card in ipairs(self.cardGrid.cards) do
+          if card.__data and card.__data.id == blessing.id then
+            card.__selected = nil
+            card:Enable()
+            if card.__overlay then card.__overlay:Hide() end
+            break
+          end
         end
       end
     end
   end
-end
 
 function NS.BlessingWindow:Hide()
   NS.Logger:UI("Скрытие окна BlessingWindow (мокап)")
@@ -294,7 +295,7 @@ function NS.BlessingWindow:AddBlessingToSlot(blessing, card)
       slot:SetActive(true)
 
       if card then
-        card:Disable()
+        card.__selected = true
         if not card.__overlay then
           local overlay = card:CreateTexture(nil, "OVERLAY")
           overlay:SetAllPoints(card)
@@ -327,14 +328,15 @@ function NS.BlessingWindow:RemoveBlessingFromSlot(index)
     slot:SetActive(false)
 
     if self.cardGrid and self.cardGrid.cards then
-      for _, card in ipairs(self.cardGrid.cards) do
-        if card.__data and card.__data.id == blessing.id then
-          card:Enable()
-          if card.__overlay then card.__overlay:Hide() end
-          break
+        for _, card in ipairs(self.cardGrid.cards) do
+          if card.__data and card.__data.id == blessing.id then
+            card.__selected = nil
+            card:Enable()
+            if card.__overlay then card.__overlay:Hide() end
+            break
+          end
         end
       end
-    end
     
     -- Синхронизируем с сервером
     self:UpdateBlessingPanelOnServer(blessing.id, false)
@@ -449,31 +451,37 @@ function NS.BlessingWindow:RenderCategory(category)
       fs:SetPoint("BOTTOM", card, "BOTTOM", 0, 6)
       fs:SetText(data.name)
       card.__data = data
-      card:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-      card:SetScript("OnClick", function(_, button)
-        if button == "LeftButton" then
-          self:AddBlessingToSlot(data, card)
-        elseif button == "RightButton" then
-          self:RemoveBlessingById(data.id)
+        card:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        card:SetScript("OnClick", function(_, button)
+          if card.__selected then
+            if button == "RightButton" then
+              self:RemoveBlessingById(data.id)
+            end
+            return
+          end
+          if button == "LeftButton" then
+            self:AddBlessingToSlot(data, card)
+          elseif button == "RightButton" then
+            self:RemoveBlessingById(data.id)
+          end
+        end)
+
+        for _, active in pairs(self.activeBlessings or {}) do
+          if active and active.id == data.id then
+            card.__selected = true
+            if not card.__overlay then
+              local overlay = card:CreateTexture(nil, "OVERLAY")
+              overlay:SetAllPoints(card)
+              overlay:SetColorTexture(1, 1, 1, 0.3)
+              card.__overlay = overlay
+            end
+            card.__overlay:Show()
+            break
+          end
         end
       end)
-
-      for _, active in pairs(self.activeBlessings or {}) do
-        if active and active.id == data.id then
-          card:Disable()
-          if not card.__overlay then
-            local overlay = card:CreateTexture(nil, "OVERLAY")
-            overlay:SetAllPoints(card)
-            overlay:SetColorTexture(1, 1, 1, 0.3)
-            card.__overlay = overlay
-          end
-          card.__overlay:Show()
-          break
-        end
-      end
-    end)
+    end
   end
-end
 
 function NS.BlessingWindow:SelectCategory(categoryID)
   print("|cffff0000[DEBUG]|r SelectCategory called with: " .. tostring(categoryID))
