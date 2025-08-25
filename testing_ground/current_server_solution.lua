@@ -47,7 +47,7 @@ local ServerBlessingsConfig = {
     spell_id = 190356,          -- визуал на землю
     spell_tick_id = 228599,     -- тик-спелл
     is_offensive = true, is_aoe = true, requires_target = true,
-    radius = 8.0, tick_ms = 500, duration_ms = 14000,
+    radius = 10.0, tick_ms = 500, duration_ms = 14000,
     cooldown_seconds = 12, range = 40.0,
     cost_item_id = 500000, cost_amount = 0,
     effect = 25, effect2 = nil, effect3 = nil,  -- базовая «искра»
@@ -68,7 +68,7 @@ function BlessingsHandler.RequestBlessing(player, data)
     print("[BlessingUI - Server DEBUG] -- Начало RequestBlessing --")
 
     local success_pcall, result_pcall = pcall(function()
-        local playerName = player:GetName()
+        local playerName = tostring(player:GetName())
         print("[BlessingUI - Server DEBUG] Получен запрос от: " .. playerName)
         print("[BlessingUI - Server DEBUG] Данные запроса: " .. tostring(data.blessingID))
 
@@ -107,16 +107,17 @@ function BlessingsHandler.RequestBlessing(player, data)
                 -- 2. Проверка дружебности
                 local checkRadius = 60.0
                 local friendlyUnits = player:GetFriendlyUnitsInRange(checkRadius)
-                print("[BlessingUI - Server DEBUG] Количество дружественных юнитов найдено в радиусе " .. checkRadius .. ": " .. tostring(#friendlyUnits))
+                local count = (friendlyUnits and #friendlyUnits) or 0
+                print("[BlessingUI] Дружественных: "..count)
 
                 local isTargetFriendly = false
                 if friendlyUnits then
-                    for i, unit in ipairs(friendlyUnits) do
-                        if unit and unit:GetGUID() == targetUnit:GetGUID() then
-                            isTargetFriendly = true
-                            break
-                        end
+                  for _, unit in ipairs(friendlyUnits) do
+                    if unit and unit:GetGUID() == targetUnit:GetGUID() then
+                      isTargetFriendly = true
+                      break
                     end
+                  end
                 end
 
                 if isTargetFriendly then
@@ -154,28 +155,11 @@ function BlessingsHandler.RequestBlessing(player, data)
         -- === ПРОВЕРКИ ИГРОКА === (встроенные как в старом коде)
         
         -- Проверка активности ауры (только для не-атакующих)
-        if not info.is_offensive and info.spell_id and player:HasAura(info.spell_id) then
+        if not info.is_offensive and info.spell_id and finalSpellTarget:HasAura(info.spell_id) then
             player:SendBroadcastMessage(("%s уже активен!"):format(info.name))
             print("[BlessingUI - ServerDEBUG] Благословение уже активно.")
             return
         end
-		
-		if not info.is_offensive then
-			-- 1) Визуал (мгновенно, без стоимости)
-			if info.spell_id > 0 then
-				pcall(player.CastSpell, player, finalSpellTarget, info.spell_id, true)
-			end
-
-			-- 2) Гарантированно повесим ауру, если её нет
-			local existing = finalSpellTarget:GetAura(info.spell_id)
-			if not existing then
-				local ok, auraObj = pcall(player.AddAura, player, info.spell_id, finalSpellTarget)
-				if ok and auraObj and info.aura_duration_ms then
-					auraObj:SetMaxDuration(info.aura_duration_ms)
-					auraObj:SetDuration(info.aura_duration_ms)
-				end
-			end
-		end
 
         -- Проверка кулдауна
         local playerGUID = player:GetGUIDLow()
@@ -242,19 +226,20 @@ function rand_pm(x) return 1 + (math.random(-x, x) * 0.01) end
 function rand_pm25() return rand_pm(25) end
 
 function DoBuff(caster, target, info)
-    -- 1) Применим спелл, если он задан
-    if info.spell_id > 0 then
-        pcall(caster.CastSpell, caster, target, info.spell_id, true)
-    end
-    -- 2) Гарантированно повесим ауру, если её нет
-    local existing = target:GetAura(info.spell_id)
-    if not existing then
-        local ok, auraObj = pcall(caster.AddAura, caster, info.spell_id, target)
-        if ok and auraObj and info.aura_duration_ms then
-            auraObj:SetMaxDuration(info.aura_duration_ms)
-            auraObj:SetDuration(info.aura_duration_ms)
-        end
-    end
+  local sid = tonumber(info.spell_id or 0) or 0
+  if sid <= 0 then return end
+  if target:HasAura(sid) then return end
+
+  local ok, auraObj = pcall(caster.CastCustomSpell, caster, target, sid, true)
+  if not ok then
+    print("[BlessingUI] AddAura failed for spell "..tostring(sid))
+    return
+  end
+
+  -- Если нужен чисто визуал — введи info.visual_spell_id и кастуй его отдельно:
+  -- if info.visual_spell_id and info.visual_spell_id > 0 then
+  --   pcall(caster.CastSpell, caster, target, info.visual_spell_id, true)
+  -- end
 end
 
 
@@ -408,15 +393,18 @@ if not StartGroundAoE then
       if #validTargets > 0 then
         local dmgTick = AoE_tick_from_single(singleBase, #validTargets, info.aoe_cap_targets or 8, 0.75)
         local bp0, bp1, bp2 = build_bp_triplet(info, dmgTick)
-        
+
         for _, u in ipairs(validTargets) do
-          local ok = pcall(wo.CastCustomSpell, wo, u, spell_tick_id, true, bp0, bp1, bp2)
-          if ok then hits = hits + 1 end
+          if u and u.IsInWorld and u:IsInWorld() and u:IsAlive()
+             and (u:GetDistance(cx, cy, cz) or 1e9) <= radius then
+            local ok = pcall(wo.CastCustomSpell, wo, u, spell_tick_id, true, bp0, bp1, bp2)
+            if ok then hits = hits + 1 end
+          end
         end
       end
 
       -- отладка
-      print(("[BlessingUI - Server DEBUG] AoE tick pdist=%.1f searchR=%.1f pool=%d valid=%d hits=%d"):format(pdist, searchR, #pool, #validTargets, hits))
+      --print(("[BlessingUI - Server DEBUG] AoE tick pdist=%.1f searchR=%.1f pool=%d valid=%d hits=%d"):format(pdist, searchR, #pool, #validTargets, hits))
       
       if repeatsLeft and repeatsLeft <= 1 then
         print("[BlessingUI - Server DEBUG] AoE finished")

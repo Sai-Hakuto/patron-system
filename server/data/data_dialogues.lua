@@ -234,6 +234,7 @@ local Dialogues = {
         SpeakerID = 0, 
         IsPlayerOption = true, 
         Text = "[Заплатить 100 золотых] Это хорошая инвестиция.", 
+		NextNodeID = 20006,
         Conditions = {{Type="HAS_MONEY", Amount=1000000}}, -- 100 золотых в медных монетах
         Actions = { 
             {Type="LOST_MONEY", Amount=1000000}, 
