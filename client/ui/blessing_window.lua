@@ -1,35 +1,72 @@
---[[==========================================================================
-  PATRON SYSTEM - BLESSING WINDOW (on BaseWindow)
-  Переписанный мокап окна благословений с использованием BaseWindow
+--[[============================================================================
+  PATRON SYSTEM — BLESSING WINDOW (stable final)
+  Требования:
+  • Панель снизу на 12 слотов.
+  • Иконки/карточки со стилем «спеллов»: highlight, hover, тултипы.
+  • ЛКМ по карточке → добавить в панель (в первый свободный слот).
+  • ПКМ по карточке или по слоту → удалить из панели.
+  • Без disable карточек — чтобы ПКМ всегда работал сразу после добавления.
+  • Синхронизация с сервером (AIO.Handle) и локальным кэшем (DataManager).
 ============================================================================]]--
 
 local NS = PatronSystemNS
 local BW = NS.BaseWindow
 
--- Реальные данные благословений получаются из DataManager
+local function GetAIO() return _G.AIO or AIO end
 
+-- ---------------------------------------------------------------------------
+-- ВСПОМОГАТЕЛЬНЫЕ ТУЛТИПЫ
+-- ---------------------------------------------------------------------------
+local function ShowBlessingTooltip(owner, b)
+  if not b then return end
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  GameTooltip:ClearLines()
+  GameTooltip:AddLine(b.name or "Blessing", 1, 1, 1)
+  if b.description and b.description ~= "" then
+    GameTooltip:AddLine(b.description, 0.9, 0.9, 0.9, true)
+  end
+  if b.blessing_type then
+    GameTooltip:AddLine(("Тип: %s"):format(tostring(b.blessing_type)), 0.6, 0.8, 1)
+  end
+  GameTooltip:Show()
+end
+
+local function ShowEmptySlotTooltip(owner)
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  GameTooltip:ClearLines()
+  GameTooltip:AddLine("Свободный слот", 1, 1, 1)
+  GameTooltip:AddLine("ЛКМ по карточке сверху — добавить.
+ПКМ по слоту — удалить.", 0.9, 0.9, 0.9, true)
+  GameTooltip:Show()
+end
+
+local function HideTooltip()
+  GameTooltip_Hide()
+end
+
+-- ---------------------------------------------------------------------------
+-- ОПРЕДЕЛЕНИЕ ОКНА
+-- ---------------------------------------------------------------------------
 NS.BlessingWindow = BW:New("BlessingWindow", {
   windowType = NS.Config.WindowType.BLESSING,
   hooks = {
     onInit = function(self)
-      -- Заголовок
       if self.elements and self.elements.title then
         self.elements.title:SetText("Благословения")
       end
 
-      -- ================== СЕЛЕКТОР КАТЕГОРИЙ ==================
+      -- Вкладки категорий
       local tabs = {
-        { id = "Defensive", title = "Defensive" },
-        { id = "Offensive", title = "Offensive" },
-        { id = "Support",   title = "Support"   },
+        { id="Defensive", title="Defensive" },
+        { id="Offensive", title="Offensive" },
+        { id="Support",   title="Support"   },
       }
-
       self.categoryTabs = self:CreateTabsBar(self.frame, tabs, {
-        height   = 30,
+        height = 30,
         onChange = function(id) self:SelectCategory(id) end,
       })
 
-      -- Описание выбранной категории
+      -- Подпись под вкладками
       self.elements.descText = self:CreateText(self.frame, {
         template = "GameFontHighlightSmall",
         width    = self.frame:GetWidth() - 20,
@@ -39,22 +76,37 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
         colorKey = "dialogText",
       })
 
-      -- ================== СЕТКА КАРТОЧЕК БЛАГОСЛОВЕНИЙ ==================
+      -- Сетка карточек благословений
       self.cardGrid = self:CreateCardGrid(self.frame, {
         top    = 110,
-        bottom = 80,
+        bottom = 110,
+        cellW  = 72,
+        cellH  = 72,
+        cols   = 6,
+        gapX   = 8,
+        gapY   = 8,
       })
 
-      -- ================== ПАНЕЛЬ АКТИВНЫХ БЛАГОСЛОВЕНИЙ ==================
-      self.activeBar = self:CreateSlotBar(self.frame, 6, {
-        title = "Active Blessings:",
+      -- Панель активных благословений — 12 слотов
+      self.activeBar = self:CreateSlotBar(self.frame, 12, {
+        size = 48,
+        gap  = 6,
+        cols = 12,
+        plusText = "+",
+        onEnter = function(i, slot)
+          if slot.__blessing then ShowBlessingTooltip(slot, slot.__blessing) else ShowEmptySlotTooltip(slot) end
+        end,
+        onLeave = function() HideTooltip() end,
       })
-      self.activeBar.frame:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, 15)
+      self.activeBar.frame:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, 16)
 
       self.activeBlessings = {}
 
+      -- Обработчики слотов
       for i, slot in ipairs(self.activeBar.slots) do
         local idx = i
+        slot:SetHighlightTexture("Interface\\Buttons\ButtonHilight-Square")
+        slot:GetHighlightTexture():SetBlendMode("ADD")
         slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         slot:HookScript("OnClick", function(_, button)
           if button == "RightButton" then
@@ -63,214 +115,21 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
         end)
       end
     end,
-
-    onAfterShow = function(self)
-      -- Category selection handled elsewhere to avoid duplicate calls
-    end,
   }
 })
 
+-- ---------------------------------------------------------------------------
+-- ПУБЛИЧНЫЕ МЕТОДЫ ОКНА
+-- ---------------------------------------------------------------------------
 function NS.BlessingWindow:Show(payload)
   BW.prototype.Show(self, payload)
-  
-  print("|cffff0000[DEBUG]|r BlessingWindow:Show called")
-  
-  -- Устанавливаем категорию по умолчанию если не задана
-  if not self.currentCategory then
-    self.currentCategory = "Defensive"
-  end
-  
-  -- ИСПРАВЛЕНО: Всегда загружаем состояние панели при открытии окна
-  -- чтобы синхронизироваться с данными сервера
-  print("|cffff0000[DEBUG]|r Always loading panel state on window open")
-  print("|cffff0000[DEBUG]|r About to call LoadPanelState")
-  local success, err = pcall(self.LoadPanelState, self)
-  print("|cffff0000[DEBUG]|r LoadPanelState call result: success=" .. tostring(success))
-  if not success then
-    print("|cffff0000[ERROR]|r LoadPanelState error: " .. tostring(err))
-  end
-
-  -- Обновляем данные и отображаем категорию после загрузки панели
-  self:RefreshData()
+  if not self.currentCategory then self.currentCategory = "Defensive" end
+  self:LoadPanelState()
   self:SelectCategory(self.currentCategory)
-
-  print("|cffff0000[DEBUG]|r BlessingWindow:Show completed")
-  
-  NS.Logger:UI("Показ окна BlessingWindow")
-  if NS.UIManager then
-    NS.UIManager:ShowMessage("Окно благословений открыто", "success")
-  end
+  if NS.UIManager then NS.UIManager:ShowMessage("Окно благословений открыто", "success") end
 end
-
-function NS.BlessingWindow:RefreshData()
-  print("|cffff0000[DEBUG]|r RefreshData called, currentCategory=" .. tostring(self.currentCategory))
-
-  -- Данные обновлены, отрисовка категории выполняется после загрузки состояния панели
-  if not self.currentCategory then
-    print("|cffff0000[DEBUG]|r No currentCategory set, skipping selection")
-  end
-
-  -- НЕ перезагружаем состояние панели здесь - это сбрасывает локальные изменения
-
-  print("|cffff0000[DEBUG]|r RefreshData completed")
-end
-
-function NS.BlessingWindow:UpdateBlessingPanelOnServer(blessingId, isInPanel)
-  local AIO = AIO or require("AIO")
-  if not AIO then return end
-  
-  AIO.Handle(NS.ADDON_PREFIX, "UpdateBlessingPanel", {
-    blessingId = blessingId,
-    isInPanel = isInPanel
-  })
-  
-  NS.Logger:UI("Отправка обновления панели на сервер: blessing=" .. blessingId .. ", inPanel=" .. tostring(isInPanel))
-end
-
-function NS.BlessingWindow:UpdateLocalBlessingState(blessingId, isInPanel)
-  -- Обновляем локальный кэш DataManager сразу для синхронизации UI
-  if NS.DataManager and NS.DataManager:GetData() then
-    local data = NS.DataManager:GetData()
-    if data and data.blessings and data.blessings[tostring(blessingId)] then
-      data.blessings[tostring(blessingId)].isInPanel = isInPanel
-      print("|cffff0000[CACHE UPDATE]|r Blessing " .. blessingId .. " isInPanel updated to " .. tostring(isInPanel))
-    end
-  end
-end
-
-function NS.BlessingWindow:DumpBlessingStates()
-  if not (NS.DataManager and NS.DataManager.GetData) then
-    print("|cffff0000[PANEL DEBUG]|r DataManager not available for DumpBlessingStates")
-    return
-  end
-
-  local data = NS.DataManager:GetData()
-  if not (data and data.blessings) then
-    print("|cffff0000[PANEL DEBUG]|r No blessing data to dump")
-    return
-  end
-
-  print("|cffff0000[PANEL DEBUG]|r Dumping blessing states:")
-  for blessingId, blessingData in pairs(data.blessings) do
-    print("|cffff0000[PANEL DEBUG]|r Blessing " .. blessingId ..
-      ": isDiscovered=" .. tostring(blessingData.isDiscovered) ..
-      ", isInPanel=" .. tostring(blessingData.isInPanel))
-  end
-end
-
-function NS.BlessingWindow:LoadPanelState()
-  print("|cffff0000[PANEL DEBUG]|r LoadPanelState called")
-  self:DumpBlessingStates()
-  
-  -- Очищаем текущую панель без синхронизации с сервером
-  if self.activeBar and self.activeBar.slots then
-    for i, slot in ipairs(self.activeBar.slots) do
-      if slot.__blessing then
-        self:RemoveBlessingFromSlotSilent(i)
-      end
-    end
-  end
-  
-  -- Загружаем благословения с isInPanel = true
-  if NS.DataManager and NS.DataManager.GetData then
-    local data = NS.DataManager:GetData()
-    print("|cffff0000[PANEL DEBUG]|r Got data: " .. tostring(data ~= nil))
-    
-    if data and data.blessings then
-      print("|cffff0000[PANEL DEBUG]|r Found blessings, checking isInPanel...")
-      local panelCount = 0
-      
-      for blessingId, blessingData in pairs(data.blessings) do
-        print("|cffff0000[PANEL DEBUG]|r Blessing " .. blessingId .. 
-          ": isInPanel=" .. tostring(blessingData.isInPanel) .. 
-          " (type=" .. type(blessingData.isInPanel) .. ")" ..
-          ", isDiscovered=" .. tostring(blessingData.isDiscovered) .. 
-          " (type=" .. type(blessingData.isDiscovered) .. ")")
-          
-        local shouldAdd = blessingData.isInPanel and blessingData.isDiscovered
-        print("|cffff0000[PANEL DEBUG]|r Condition result for " .. blessingId .. ": " .. tostring(shouldAdd))
-          
-        if shouldAdd then
-          panelCount = panelCount + 1
-          print("|cffff0000[PANEL DEBUG]|r Adding blessing " .. blessingId .. " to panel")
-
-          local blessing = {
-            id = tonumber(blessingId),
-            name = blessingData.name,
-            description = blessingData.description,
-            icon = blessingData.icon,
-            blessing_type = blessingData.blessing_type
-          }
-          -- Добавляем в панель без отправки на сервер (уже там)
-          self:AddBlessingToSlotSilent(blessing)
-        end
-      end
-      
-      print("|cffff0000[PANEL DEBUG]|r Total blessings added to panel: " .. panelCount)
-    else
-      print("|cffff0000[PANEL DEBUG]|r No blessing data found")
-    end
-  else
-    print("|cffff0000[PANEL DEBUG]|r DataManager not available")
-  end
-
-  print("|cffff0000[PANEL DEBUG]|r LoadPanelState completed")
-end
-
-function NS.BlessingWindow:AddBlessingToSlotSilent(blessing)
-  print("|cffff0000[SLOT DEBUG]|r AddBlessingToSlotSilent called for blessing " .. tostring(blessing and blessing.id))
-  
-  -- Версия AddBlessingToSlot без синхронизации с сервером
-  if not self.activeBar or not self.activeBar.slots then 
-    print("|cffff0000[SLOT DEBUG]|r No activeBar or slots available")
-    return 
-  end
-  for i, slot in ipairs(self.activeBar.slots) do
-    if not slot.__blessing then
-      if not slot.icon then
-        slot.icon = slot:CreateTexture(nil, "ARTWORK")
-        slot.icon:SetAllPoints()
-        slot.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-      end
-      slot.icon:SetTexture(blessing.icon)
-      slot.icon:Show()
-      if slot.__fs then slot.__fs:SetText("") end
-      slot.__blessing = blessing
-      self.activeBlessings[i] = blessing
-      slot:SetActive(true)
-      print("|cffff0000[SLOT DEBUG]|r Added blessing " .. blessing.id .. " to slot " .. i)
-      break
-    end
-  end
-end
-
-function NS.BlessingWindow:RemoveBlessingFromSlotSilent(index)
-  -- Версия RemoveBlessingFromSlot без синхронизации с сервером
-  if not self.activeBar or not self.activeBar.slots or not self.activeBar.slots[index] then return end
-  local slot = self.activeBar.slots[index]
-  if slot.__blessing then
-    local blessing = slot.__blessing
-    if slot.icon then slot.icon:Hide() end
-    if slot.__fs then slot.__fs:SetText("+") end
-    slot.__blessing = nil
-    self.activeBlessings[index] = nil
-    slot:SetActive(false)
-
-    if self.cardGrid and self.cardGrid.cards then
-        for _, card in ipairs(self.cardGrid.cards) do
-          if card.__data and card.__data.id == blessing.id then
-            card.__selected = nil
-            card:Enable()
-            if card.__overlay then card.__overlay:Hide() end
-            break
-          end
-        end
-      end
-    end
-  end
 
 function NS.BlessingWindow:Hide()
-  NS.Logger:UI("Скрытие окна BlessingWindow (мокап)")
   BW.prototype.Hide(self)
 end
 
@@ -278,236 +137,200 @@ function NS.BlessingWindow:Toggle(payload)
   BW.prototype.Toggle(self, payload)
 end
 
-function NS.BlessingWindow:AddBlessingToSlot(blessing, card)
-  if not self.activeBar or not self.activeBar.slots then return end
-  for i, slot in ipairs(self.activeBar.slots) do
-    if not slot.__blessing then
-      if not slot.icon then
-        slot.icon = slot:CreateTexture(nil, "ARTWORK")
-        slot.icon:SetAllPoints()
-        slot.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-      end
-      slot.icon:SetTexture(blessing.icon)
-      slot.icon:Show()
-      if slot.__fs then slot.__fs:SetText("") end
-      slot.__blessing = blessing
-      self.activeBlessings[i] = blessing
-      slot:SetActive(true)
+-- ---------------------------------------------------------------------------
+-- СИНХРОНИЗАЦИЯ C БД / КЭШЕМ
+-- ---------------------------------------------------------------------------
+function NS.BlessingWindow:UpdateBlessingPanelOnServer(blessingId, isInPanel)
+  local AIO = GetAIO(); if not AIO then return end
+  AIO.Handle(NS.ADDON_PREFIX, "UpdateBlessingPanel", { blessingId = blessingId, isInPanel = not not isInPanel })
+end
 
-      if card then
-        card.__selected = true
-        if not card.__overlay then
-          local overlay = card:CreateTexture(nil, "OVERLAY")
-          overlay:SetAllPoints(card)
-          overlay:SetColorTexture(1, 1, 1, 0.3)
-          card.__overlay = overlay
-        end
-        card.__overlay:Show()
-      end
-      
-      -- Синхронизируем с сервером
-      self:UpdateBlessingPanelOnServer(blessing.id, true)
-      
-      -- Обновляем локальный кэш сразу для быстрого UI отклика
-      self:UpdateLocalBlessingState(blessing.id, true)
+function NS.BlessingWindow:UpdateLocalBlessingState(blessingId, isInPanel)
+  local dm = NS.DataManager; local data = dm and dm:GetData()
+  if data and data.blessings and data.blessings[tostring(blessingId)] then
+    data.blessings[tostring(blessingId)].isInPanel = not not isInPanel
+  end
+end
 
-      break
+-- ---------------------------------------------------------------------------
+-- ЗАГРУЗКА СОСТОЯНИЯ ПАНЕЛИ (12 слотов)
+-- ---------------------------------------------------------------------------
+function NS.BlessingWindow:LoadPanelState()
+  -- очистка без синхронизации
+  if self.activeBar and self.activeBar.slots then
+    for i in ipairs(self.activeBar.slots) do self:RemoveBlessingFromSlotSilent(i) end
+  end
+  local dm = NS.DataManager; local data = dm and dm:GetData(); if not (data and data.blessings) then return end
+  for id, b in pairs(data.blessings) do
+    if b.isDiscovered and b.isInPanel then
+      local blessing = { id = tonumber(b.blessing_id) or tonumber(id), name=b.name, description=b.description, icon=b.icon, blessing_type=b.blessing_type }
+      self:AddBlessingToSlotSilent(blessing)
     end
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- ПАНЕЛЬ: ДОБАВЛЕНИЕ / УДАЛЕНИЕ
+-- ---------------------------------------------------------------------------
+local function FirstFreeSlot(self)
+  for i, slot in ipairs(self.activeBar.slots or {}) do if not slot.__blessing then return i end end
+end
+
+function NS.BlessingWindow:AddBlessingToSlot(blessing, card)
+  if not (self.activeBar and self.activeBar.slots) then return end
+  -- защита от дублей
+  for _, s in ipairs(self.activeBar.slots) do
+    if s.__blessing and s.__blessing.id == blessing.id then return end
+  end
+  local idx = FirstFreeSlot(self); if not idx then if NS.UIManager then NS.UIManager:ShowMessage("Панель заполнена (12/12)", "warning") end return end
+  local slot = self.activeBar.slots[idx]
+  if not slot.icon then slot.icon = slot:CreateTexture(nil, "ARTWORK"); slot.icon:SetAllPoints(); slot.icon:SetTexCoord(0.07,0.93,0.07,0.93) end
+  slot.icon:SetTexture(blessing.icon); slot.icon:Show()
+  if slot.__fs then slot.__fs:SetText("") end
+  slot.__blessing = blessing; self.activeBlessings[idx] = blessing; slot:SetActive(true)
+
+  -- ВАЖНО: карточку НЕ отключаем — чтобы ПКМ работал сразу
+  if card then
+    card.__selected = true
+    if not card.__overlay then
+      local ov = card:CreateTexture(nil, "OVERLAY")
+      ov:SetAllPoints(card)
+      ov:SetTexture("Interface\\Buttons\ButtonHilight-Square")
+      ov:SetBlendMode("ADD")
+      card.__overlay = ov
+    end
+    card.__overlay:Show()
+    card:Enable(); card:EnableMouse(true); card:RegisterForClicks("LeftButtonUp","RightButtonUp")
+  end
+
+  self:UpdateBlessingPanelOnServer(blessing.id, true)
+  self:UpdateLocalBlessingState(blessing.id, true)
+end
+
+function NS.BlessingWindow:AddBlessingToSlotSilent(blessing)
+  if not (self.activeBar and self.activeBar.slots) then return end
+  local idx = FirstFreeSlot(self); if not idx then return end
+  local slot = self.activeBar.slots[idx]
+  if not slot.icon then slot.icon = slot:CreateTexture(nil, "ARTWORK"); slot.icon:SetAllPoints(); slot.icon:SetTexCoord(0.07,0.93,0.07,0.93) end
+  slot.icon:SetTexture(blessing.icon); slot.icon:Show()
+  if slot.__fs then slot.__fs:SetText("") end
+  slot.__blessing = blessing; self.activeBlessings[idx] = blessing; slot:SetActive(true)
 end
 
 function NS.BlessingWindow:RemoveBlessingFromSlot(index)
-  if not self.activeBar or not self.activeBar.slots or not self.activeBar.slots[index] then return end
-  local slot = self.activeBar.slots[index]
-  if slot.__blessing then
-    local blessing = slot.__blessing
-    if slot.icon then slot.icon:Hide() end
-    if slot.__fs then slot.__fs:SetText("+") end
-    slot.__blessing = nil
-    self.activeBlessings[index] = nil
-    slot:SetActive(false)
+  if not (self.activeBar and self.activeBar.slots and self.activeBar.slots[index]) then return end
+  local slot = self.activeBar.slots[index]; if not slot.__blessing then return end
+  local b = slot.__blessing
+  if slot.icon then slot.icon:Hide() end; if slot.__fs then slot.__fs:SetText("+") end
+  slot.__blessing = nil; self.activeBlessings[index] = nil; slot:SetActive(false); HideTooltip()
 
-    if self.cardGrid and self.cardGrid.cards then
-        for _, card in ipairs(self.cardGrid.cards) do
-          if card.__data and card.__data.id == blessing.id then
-            card.__selected = nil
-            card:Enable()
-            if card.__overlay then card.__overlay:Hide() end
-            break
-          end
-        end
+  -- снять выделение и восстановить кликабельность карточки в гриде
+  if self.cardGrid and self.cardGrid.cards then
+    for _, card in ipairs(self.cardGrid.cards) do
+      if card.__data and card.__data.id == b.id then
+        card.__selected = nil
+        if card.__overlay then card.__overlay:Hide() end
+        card:Enable(); card:EnableMouse(true); card:RegisterForClicks("LeftButtonUp","RightButtonUp")
+        break
       end
-    
-    -- Синхронизируем с сервером
-    self:UpdateBlessingPanelOnServer(blessing.id, false)
-    
-    -- Обновляем локальный кэш сразу для быстрого UI отклика
-    self:UpdateLocalBlessingState(blessing.id, false)
+    end
   end
+
+  self:UpdateBlessingPanelOnServer(b.id, false)
+  self:UpdateLocalBlessingState(b.id, false)
+end
+
+function NS.BlessingWindow:RemoveBlessingFromSlotSilent(index)
+  if not (self.activeBar and self.activeBar.slots and self.activeBar.slots[index]) then return end
+  local slot = self.activeBar.slots[index]; if not slot.__blessing then return end
+  if slot.icon then slot.icon:Hide() end; if slot.__fs then slot.__fs:SetText("+") end
+  slot.__blessing = nil; self.activeBlessings[index] = nil; slot:SetActive(false); HideTooltip()
 end
 
 function NS.BlessingWindow:RemoveBlessingById(blessingId)
-  if not self.activeBlessings then return end
-  for index, blessing in pairs(self.activeBlessings) do
-    if blessing and blessing.id == blessingId then
-      self:RemoveBlessingFromSlot(index)
-      break
-    end
-  end
+  for idx, b in pairs(self.activeBlessings) do if b and b.id == blessingId then self:RemoveBlessingFromSlot(idx); return end end
 end
 
+-- ---------------------------------------------------------------------------
+-- РЕНДЕРИНГ КАТЕГОРИЙ И КАРТОЧЕК
+-- ---------------------------------------------------------------------------
 function NS.BlessingWindow:GetBlessingsForCategory(category)
-  print("|cffff0000[DEBUG]|r GetBlessingsForCategory called with: " .. tostring(category))
-  
-  local blessings = {}
-  
-  -- Получаем данные из DataManager
-  print("|cffff0000[DEBUG]|r DataManager exists: " .. tostring(NS.DataManager ~= nil))
-  print("|cffff0000[DEBUG]|r GetData exists: " .. tostring(NS.DataManager and NS.DataManager.GetData ~= nil))
-  
-  if NS.DataManager and NS.DataManager.GetData then
-    local success, data = pcall(NS.DataManager.GetData, NS.DataManager)
-    print("|cffff0000[DEBUG]|r GetData success: " .. tostring(success))
-    if not success then
-      print("|cffff0000[DEBUG ERROR]|r GetData failed: " .. tostring(data))
-      return blessings
-    end
-    print("|cffff0000[DEBUG]|r Got data: " .. tostring(data ~= nil))
-    
-    if data then
-      print("|cffff0000[DEBUG]|r data.blessings exists: " .. tostring(data.blessings ~= nil))
-      
-      if data.blessings then
-        local totalCount = 0
-        local discoveredCount = 0
-        local categoryCount = 0
-        
-        for blessingId, blessingData in pairs(data.blessings) do
-          totalCount = totalCount + 1
-          print("|cffff0000[DEBUG]|r Processing blessing " .. blessingId .. 
-            ", discovered=" .. tostring(blessingData.isDiscovered) ..
-            ", type=" .. tostring(blessingData.blessing_type))
-          
-          if blessingData.isDiscovered then
-            discoveredCount = discoveredCount + 1
-            
-            if blessingData.blessing_type == category then
-              categoryCount = categoryCount + 1
-              table.insert(blessings, {
-                id = blessingData.blessing_id,
-                name = blessingData.name,
-                description = blessingData.description,
-                icon = blessingData.icon,
-                blessing_type = blessingData.blessing_type,
-                isInPanel = blessingData.isInPanel
-              })
-            end
-          end
-        end
-        
-        print("|cffff0000[DEBUG]|r Blessing stats: total=" .. totalCount .. 
-          ", discovered=" .. discoveredCount .. 
-          ", category(" .. category .. ")=" .. categoryCount)
-      else
-        print("|cffff0000[DEBUG]|r No blessings in data")
+  local dm = NS.DataManager; local data = dm and dm:GetData(); local out = {}
+  if data and data.blessings then
+    for _, v in pairs(data.blessings) do
+      if v.isDiscovered and v.blessing_type == category then
+        table.insert(out, {
+          id = tonumber(v.blessing_id) or tonumber(v.id) or 0,
+          name = v.name, description = v.description, icon = v.icon, blessing_type = v.blessing_type,
+          isInPanel = not not v.isInPanel,
+        })
       end
-    else
-      print("|cffff0000[DEBUG]|r No data from DataManager")
     end
-  else
-    print("|cffff0000[DEBUG]|r DataManager or GetData not available")
   end
-  
-  -- Сортируем по ID для стабильности
-  table.sort(blessings, function(a, b) return a.id < b.id end)
-  
-  return blessings
+  table.sort(out, function(a,b) return (a.id or 0) < (b.id or 0) end)
+  return out
 end
 
 function NS.BlessingWindow:RenderCategory(category)
-  print("|cffff0000[DEBUG]|r RenderCategory called with: " .. tostring(category))
-  print("|cffff0000[DEBUG]|r cardGrid exists: " .. tostring(self.cardGrid ~= nil))
-  
-  if not self.cardGrid then 
-    print("|cffff0000[DEBUG]|r No cardGrid, exiting")
-    return 
-  end
-  
+  if not self.cardGrid then return end
   self.cardGrid:Clear()
-  
-  -- Получаем данные благословений из DataManager
-  print("|cffff0000[DEBUG]|r About to call GetBlessingsForCategory")
   local blessings = self:GetBlessingsForCategory(category)
-  print("|cffff0000[DEBUG]|r Got " .. #blessings .. " blessings")
-  
-  for _, blessing in ipairs(blessings) do
-    self.cardGrid:AddCard(blessing, function(card, data)
+
+  for _, data in ipairs(blessings) do
+    self.cardGrid:AddCard(data, function(card, b)
+      -- чистая иконка «как у спелла»
       card:SetBackdrop(nil)
-      local icon = card:CreateTexture(nil, "ARTWORK")
-      icon:SetAllPoints(card)
-      icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-      icon:SetTexture(data.icon)
-      local fs = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-      fs:SetPoint("BOTTOM", card, "BOTTOM", 0, 6)
-      fs:SetText(data.name)
-      card.__data = data
-        card:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        card:SetScript("OnClick", function(_, button)
-          if card.__selected then
-            if button == "RightButton" then
-              self:RemoveBlessingById(data.id)
-            end
-            return
-          end
-          if button == "LeftButton" then
-            self:AddBlessingToSlot(data, card)
-          elseif button == "RightButton" then
-            self:RemoveBlessingById(data.id)
-          end
-        end)
+      card:SetNormalTexture(b.icon)
+      card:SetPushedTexture(b.icon)
+      card:SetHighlightTexture("Interface\\Buttons\ButtonHilight-Square")
+      card:GetHighlightTexture():SetBlendMode("ADD")
 
-        for _, active in pairs(self.activeBlessings or {}) do
-          if active and active.id == data.id then
-            card.__selected = true
-            if not card.__overlay then
-              local overlay = card:CreateTexture(nil, "OVERLAY")
-              overlay:SetAllPoints(card)
-              overlay:SetColorTexture(1, 1, 1, 0.3)
-              card.__overlay = overlay
-            end
-            card.__overlay:Show()
-            break
-          end
+      local icon = card:CreateTexture(nil, "ARTWORK"); icon:SetAllPoints(); icon:SetTexCoord(0.07,0.93,0.07,0.93); icon:SetTexture(b.icon)
+
+      card.__data = b
+      card:Enable(); card:EnableMouse(true); card:RegisterForClicks("LeftButtonUp","RightButtonUp")
+
+      card:SetScript("OnEnter", function(btn) ShowBlessingTooltip(btn, b) end)
+      card:SetScript("OnLeave", HideTooltip)
+
+      card:SetScript("OnClick", function(_, button)
+        if card.__selected then
+          if button == "RightButton" then self:RemoveBlessingById(b.id) end
+          return
         end
+        if button == "LeftButton" then self:AddBlessingToSlot(b, card)
+        elseif button == "RightButton" then self:RemoveBlessingById(b.id) end
       end)
-    end
-  end
 
-function NS.BlessingWindow:SelectCategory(categoryID)
-  print("|cffff0000[DEBUG]|r SelectCategory called with: " .. tostring(categoryID))
-  
-  self.currentCategory = categoryID
-  if self.categoryTabs and self.categoryTabs.setActive then
-    self.categoryTabs.setActive(categoryID)
-  end
-
-  local descriptions = {
-    Defensive = "Defensive blessings provide protection and survivability bonuses to help you survive in dangerous situations.",
-    Offensive = "Offensive blessings enhance your damage output and combat effectiveness against your enemies.",
-    Support   = "Support blessings offer utility effects like movement speed, resource regeneration, and group benefits.",
-  }
-  if self.elements.descText then
-    self.elements.descText:SetText(descriptions[categoryID] or "Category description not available.")
-  end
-
-  print("|cffff0000[DEBUG]|r About to call RenderCategory")
-  self:RenderCategory(categoryID)
-  print("|cffff0000[DEBUG]|r RenderCategory completed")
-
-  if NS.UIManager then
-    NS.UIManager:ShowMessage("Категория " .. categoryID .. " выбрана", "info")
+      -- если уже в панели — подсветка и запрет дубля (но без Disable)
+      for _, active in pairs(self.activeBlessings or {}) do
+        if active and active.id == b.id then
+          card.__selected = true
+          if not card.__overlay then
+            local ov = card:CreateTexture(nil, "OVERLAY")
+            ov:SetAllPoints(card)
+            ov:SetTexture("Interface\\Buttons\ButtonHilight-Square")
+            ov:SetBlendMode("ADD")
+            card.__overlay = ov
+          end
+          card.__overlay:Show()
+          break
+        end
+      end
+    end)
   end
 end
 
-print("|cff00ff00[PatronSystem]|r BlessingWindow загружен")
+function NS.BlessingWindow:SelectCategory(categoryID)
+  self.currentCategory = categoryID
+  if self.categoryTabs and self.categoryTabs.setActive then self.categoryTabs.setActive(categoryID) end
+  local descriptions = {
+    Defensive = "Defensive blessings provide protection and survivability bonuses.",
+    Offensive = "Offensive blessings enhance your damage output.",
+    Support   = "Support blessings offer utility and group benefits.",
+  }
+  if self.elements.descText then self.elements.descText:SetText(descriptions[categoryID] or "") end
+  self:RenderCategory(categoryID)
+end
 
+print("|cff00ff00[PatronSystem]|r BlessingWindow загружен (stable final)")
