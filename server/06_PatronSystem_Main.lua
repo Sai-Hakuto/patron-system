@@ -992,6 +992,188 @@ local function HandleRefreshSmallTalk(player, data)
 end
 
 --[[==========================================================================
+  ОБРАБОТЧИКИ ИСПОЛЬЗОВАНИЯ БЛАГОСЛОВЕНИЙ
+============================================================================]]
+
+-- Обработка запроса на использование благословения (перенесено из 05_PatronSystem_GameLogicCore.lua)
+local function HandleRequestBlessing(player, data)
+    PatronLogger:Info("MainAIO", "HandleRequestBlessing", "Processing blessing request", {
+        player = player:GetName(),
+        blessing_id = data.blessingID
+    })
+
+    local success_pcall, result_pcall = pcall(function()
+        local playerName = tostring(player:GetName())
+        PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Request received", {
+            player = playerName,
+            blessing_id = data.blessingID
+        })
+
+        local blessingID = data.blessingID
+        local info = BlessingsData[blessingID]
+
+        if not info then
+            player:SendBroadcastMessage("Неизвестное благословение.")
+            PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Unknown blessing ID", {
+                blessing_id = blessingID
+            })
+            return
+        end
+        PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Blessing found", {
+            blessing_name = info.name,
+            spell_id = info.spell_id
+        })
+
+        -- === ЛОГИКА ОБРАБОТКИ ЦЕЛИ ===
+        local finalSpellTarget = player -- По умолчанию цель - сам игрок
+
+        if info.requires_target then
+            local targetUnit = player:GetSelection()
+
+            if not targetUnit or not targetUnit:IsInWorld() then
+                player:SendBroadcastMessage("Вам нужно выбрать цель для этого благословения, " .. info.name .. ".")
+                PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "No target selected or target not in world")
+                return
+            end
+
+            finalSpellTarget = targetUnit
+
+            if info.is_offensive then
+                -- 1. Проверка на атаку самого себя
+                if targetUnit:GetGUID() == player:GetGUID() then
+                    player:SendBroadcastMessage(("Вы не можете атаковать себя с помощью %s!"):format(info.name))
+                    PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Attempted self-attack")
+                    return
+                end
+
+                -- 2. Проверка дружебности
+                local checkRadius = 60.0
+                local friendlyUnits = player:GetFriendlyUnitsInRange(checkRadius)
+                
+                local isTargetFriendly = false
+                if friendlyUnits then
+                  for _, unit in ipairs(friendlyUnits) do
+                    if unit and unit:GetGUID() == targetUnit:GetGUID() then
+                      isTargetFriendly = true
+                      break
+                    end
+                  end
+                end
+
+                if isTargetFriendly then
+                    player:SendBroadcastMessage("Вы не можете атаковать дружественную цель с помощью " .. info.name .. "!")
+                    PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Attempted to attack friendly target")
+                    return
+                end
+
+                -- 3. Проверка, жива ли цель
+                if not targetUnit:IsAlive() then
+                    player:SendBroadcastMessage("Ваша цель мертва.")
+                    PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Target is dead")
+                    return
+                end
+
+                -- 4. Проверка "атакуемости"
+                local success, isTargetable = pcall(targetUnit.IsTargetableForAttack, targetUnit)
+                if success and not isTargetable then
+                    player:SendBroadcastMessage("Эту цель нельзя атаковать.")
+                    PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Target not attackable")
+                    return
+                end
+                
+                -- 5. Проверка дистанции
+                local max_range = info.range or 40.0
+                if player:GetDistance(targetUnit) > max_range then
+                    player:SendBroadcastMessage("Ваша цель находится слишком далеко.")
+                    PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Target too far away")
+                    return
+                end
+            end
+        end
+
+        -- === ПРОВЕРКИ ИГРОКА ===
+        
+        -- Проверка активности ауры (только для не-атакующих)
+        if not info.is_offensive and info.spell_id and finalSpellTarget:HasAura(info.spell_id) then
+            player:SendBroadcastMessage(("%s уже активен!"):format(info.name))
+            PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Blessing already active")
+            return
+        end
+
+        -- Проверка кулдауна - используем PatronGameLogicCore функции
+        if not PatronGameLogicCore.CanUseBlessing(player, blessingID) then
+            local remainingCooldown = PatronGameLogicCore.GetBlessingCooldown(player, blessingID)
+            player:SendBroadcastMessage(("Вы не можете использовать %s еще %.0f сек."):format(info.name, remainingCooldown))
+            PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Blessing on cooldown", {
+                blessing_id = blessingID,
+                remaining_seconds = remainingCooldown
+            })
+            return
+        end
+
+        -- Проверка и списание стоимости через PatronGameLogicCore
+        if info.cost_item_id and info.cost_amount > 0 then
+            -- Проверяем наличие через систему GameLogicCore
+            if not PatronGameLogicCore.HasItem(player, info.cost_item_id, info.cost_amount) then
+                player:SendBroadcastMessage("Вам не хватает реагентов для этого благословения.")
+                PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Insufficient reagents", {
+                    required_item_id = info.cost_item_id,
+                    required_amount = info.cost_amount
+                })
+                return
+            end
+            
+            -- Списываем через систему GameLogicCore (с логированием и валидацией)
+            local removeResult = PatronGameLogicCore.RemoveItem(player, info.cost_item_id, info.cost_amount)
+            if not removeResult.success then
+                player:SendBroadcastMessage("Не удалось списать реагенты для благословения.")
+                PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to remove reagents", {
+                    error = removeResult.message
+                })
+                return
+            end
+            
+            PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Reagents consumed via GameLogicCore", {
+                item_id = info.cost_item_id,
+                amount = info.cost_amount
+            })
+        end
+
+        -- === ПРИМЕНЕНИЕ ЭФФЕКТА ===
+        PatronLogger:Info("MainAIO", "HandleRequestBlessing", "Applying blessing effect", {
+            blessing_id = blessingID,
+            is_aoe = info.is_aoe,
+            is_offensive = info.is_offensive,
+            target = finalSpellTarget:GetName()
+        })
+
+        -- Применяем эффект через GameLogicCore
+        local effectResult = PatronGameLogicCore.ApplyBlessingEffect(player, finalSpellTarget, info)
+        
+        if effectResult and effectResult.success then
+            player:SendBroadcastMessage(("Вы успешно использовали %s!"):format(info.name))
+            PatronLogger:Info("MainAIO", "HandleRequestBlessing", "Blessing applied successfully", {
+                player = playerName,
+                blessing_name = info.name
+            })
+        else
+            player:SendBroadcastMessage("Не удалось применить благословение.")
+            PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to apply blessing effect")
+        end
+        
+    end) -- Конец корневого pcall
+
+    if not success_pcall then
+        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Critical error in RequestBlessing", {
+            error = tostring(result_pcall)
+        })
+        if player and pcall(player.GetName, player) then
+            player:SendBroadcastMessage("На сервере произошла критическая ошибка при обработке вашего запроса.")
+        end
+    end
+end
+
+--[[==========================================================================
   РЕГИСТРАЦИЯ AIO ОБРАБОТЧИКОВ
 ============================================================================]]
 
@@ -1020,6 +1202,40 @@ local function CreateSafeHandler(handlerName, handlerFunc)
     end
 end
 
+-- Обработчик запроса кулдаунов
+local function HandleRequestCooldowns(player)
+    if not player then 
+        PatronLogger:Error("MainAIO", "HandleRequestCooldowns", "Player is nil")
+        return 
+    end
+    
+    local playerId = player:GetGUIDLow()
+    local cooldowns = PatronGameLogicCore.playerCooldowns[playerId] or {}
+    local currentTime = os.time()
+    local cooldownData = {}
+    
+    -- Собираем актуальные кулдауны
+    for blessingId, expireTime in pairs(cooldowns) do
+        local remaining = expireTime - currentTime
+        if remaining > 0 then
+            local blessingInfo = PatronGameLogicCore.ServerBlessingsConfig[blessingId]
+            local duration = blessingInfo and blessingInfo.cooldown_seconds or 60
+            
+            cooldownData[blessingId] = {
+                remaining = remaining,
+                duration = duration
+            }
+        end
+    end
+    
+    -- Отправляем данные клиенту
+    SafeSendResponse(player, "UpdateCooldowns", cooldownData)
+    PatronLogger:Info("MainAIO", "HandleRequestCooldowns", "Cooldowns sent", {
+        player = player:GetName(),
+        cooldown_count = table.getn(cooldownData)
+    })
+end
+
 -- Регистрируем все AIO обработчики
 PatronLogger:Info("MainAIO", "Initialize", "Registering AIO handlers")
 
@@ -1042,6 +1258,10 @@ AIO.AddHandlers(ADDON_PREFIX, {
     BlessingAction = CreateSafeHandler("BlessingAction", HandleBlessingAction),
     PrayerAction = CreateSafeHandler("PrayerAction", HandlePrayerAction),
     UpdateBlessingPanel = CreateSafeHandler("UpdateBlessingPanel", HandleUpdateBlessingPanel),
+    
+    --=== БЛАГОСЛОВЕНИЯ - ИСПОЛЬЗОВАНИЕ ===--
+    RequestBlessing = CreateSafeHandler("RequestBlessing", HandleRequestBlessing),
+    RequestCooldowns = CreateSafeHandler("RequestCooldowns", HandleRequestCooldowns),
     
     --=== SMALLTALK ===--
     RefreshSmallTalk = CreateSafeHandler("RefreshSmallTalk", HandleRefreshSmallTalk),

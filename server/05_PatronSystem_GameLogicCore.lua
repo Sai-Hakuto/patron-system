@@ -605,15 +605,148 @@ function PatronGameLogicCore.RemoveBlessing(player, blessingId, playerProgress)
     }
 end
 
--- ПЛЕЙСХОЛДЕР: Проверить, можно ли использовать благословение
+--[[==========================================================================
+  СИСТЕМА КУЛДАУНОВ ДЛЯ НЕБОЛЬШИХ СЕРВЕРОВ (LUA КЭШИРОВАНИЕ)
+============================================================================]]
+
+-- Получить кулдаун благословения (в секундах, оставшихся)
+function PatronGameLogicCore.GetBlessingCooldown(player, blessingId)
+    local playerGUID = tostring(player:GetGUIDLow())
+    if not PatronGameLogicCore.playerCooldowns[playerGUID] then return 0 end
+    
+    local lastCastTime = PatronGameLogicCore.playerCooldowns[playerGUID][blessingId] or 0
+    local currentTime = os.time()
+    local info = PatronGameLogicCore.ServerBlessingsConfig[blessingId]
+    
+    if not info or not info.cooldown_seconds then return 0 end
+    
+    local elapsed = currentTime - lastCastTime
+    local remaining = info.cooldown_seconds - elapsed
+    
+    return math.max(0, remaining)
+end
+
+-- Установить кулдаун благословения
+function PatronGameLogicCore.SetBlessingCooldown(player, blessingId)
+    local playerGUID = tostring(player:GetGUIDLow())
+    if not PatronGameLogicCore.playerCooldowns[playerGUID] then
+        PatronGameLogicCore.playerCooldowns[playerGUID] = {}
+    end
+    
+    PatronGameLogicCore.playerCooldowns[playerGUID][blessingId] = os.time()
+    
+    PatronLogger:Debug("GameLogicCore", "SetBlessingCooldown", "Cooldown set", {
+        player = player:GetName(),
+        blessing_id = blessingId,
+        timestamp = PatronGameLogicCore.playerCooldowns[playerGUID][blessingId]
+    })
+end
+
+-- Очистить кулдаун благословения (для админских команд)
+function PatronGameLogicCore.ClearBlessingCooldown(player, blessingId)
+    local playerGUID = tostring(player:GetGUIDLow())
+    if PatronGameLogicCore.playerCooldowns[playerGUID] then
+        PatronGameLogicCore.playerCooldowns[playerGUID][blessingId] = nil
+        PatronLogger:Info("GameLogicCore", "ClearBlessingCooldown", "Cooldown cleared", {
+            player = player:GetName(),
+            blessing_id = blessingId
+        })
+        return true
+    end
+    return false
+end
+
+-- Очистить все кулдауны игрока (при выходе/входе)
+function PatronGameLogicCore.ClearAllPlayerCooldowns(player)
+    local playerGUID = tostring(player:GetGUIDLow())
+    PatronGameLogicCore.playerCooldowns[playerGUID] = nil
+    PatronLogger:Info("GameLogicCore", "ClearAllPlayerCooldowns", "All cooldowns cleared", {
+        player = player:GetName()
+    })
+end
+
+-- Получить все активные кулдауны игрока
+function PatronGameLogicCore.GetAllPlayerCooldowns(player)
+    local playerGUID = tostring(player:GetGUIDLow())
+    if not PatronGameLogicCore.playerCooldowns[playerGUID] then return {} end
+    
+    local activeCooldowns = {}
+    local currentTime = os.time()
+    
+    for blessingId, lastCastTime in pairs(PatronGameLogicCore.playerCooldowns[playerGUID]) do
+        local info = PatronGameLogicCore.ServerBlessingsConfig[blessingId]
+        if info and info.cooldown_seconds then
+            local elapsed = currentTime - lastCastTime
+            local remaining = info.cooldown_seconds - elapsed
+            
+            if remaining > 0 then
+                activeCooldowns[blessingId] = {
+                    remaining = remaining,
+                    total = info.cooldown_seconds,
+                    name = info.name
+                }
+            end
+        end
+    end
+    
+    return activeCooldowns
+end
+
+-- Проверить, можно ли использовать благословение
 function PatronGameLogicCore.CanUseBlessing(player, blessingId)
-    PatronLogger:Debug("GameLogicCore", "CanUseBlessing", "PLACEHOLDER: Checking blessing usage", {
+    PatronLogger:Debug("GameLogicCore", "CanUseBlessing", "Checking blessing usage", {
         player = player:GetName(),
         blessing_id = blessingId
     })
     
-    -- TODO: Реализовать проверку кулдаунов, рангов, условий
-    return true
+    local remaining = PatronGameLogicCore.GetBlessingCooldown(player, blessingId)
+    return remaining <= 0
+end
+
+-- Применить эффект благословения
+function PatronGameLogicCore.ApplyBlessingEffect(player, finalSpellTarget, info)
+    PatronLogger:Info("GameLogicCore", "ApplyBlessingEffect", "Applying blessing effect", {
+        player = player:GetName(),
+        target = finalSpellTarget:GetName(),
+        blessing_name = info.name,
+        is_aoe = info.is_aoe,
+        is_offensive = info.is_offensive
+    })
+    
+    local blessingID = info.blessing_id
+    local playerGUID = player:GetGUIDLow()
+    
+    -- Применяем эффект в зависимости от типа благословения
+    if info.is_aoe then
+        -- Используем стабильную StartGroundAoE
+        StartGroundAoE(player, finalSpellTarget, info)
+    elseif info.is_offensive then
+        -- Динамический расчет урона для single атаки
+        local singleDamage = PatronCalc_SingleBudget(player, info)
+        local bp0, bp1, bp2 = build_bp_triplet(info, singleDamage)
+        local tickId = info.spell_tick_id or info.spell_id
+        if tickId and tickId > 0 then
+            pcall(player.CastCustomSpell, player, finalSpellTarget, tickId, true, bp0, bp1, bp2)
+            PatronLogger:Debug("GameLogicCore", "ApplyBlessingEffect", "Single attack applied", {
+                damage = singleDamage,
+                spell_id = tickId
+            })
+        end
+    else
+        -- Баффы
+        DoBuff(player, finalSpellTarget, info)
+    end
+
+    -- Устанавливаем кулдаун через новую систему
+    PatronGameLogicCore.SetBlessingCooldown(player, blessingID)
+    
+    PatronLogger:Info("GameLogicCore", "ApplyBlessingEffect", "Blessing effect applied successfully", {
+        blessing_id = blessingID,
+        player = player:GetName(),
+        cooldown_seconds = info.cooldown_seconds
+    })
+    
+    return {success = true, message = "Blessing applied successfully"}
 end
 
 --[[==========================================================================
@@ -625,8 +758,6 @@ local AP_PER_DPS = 3.5               -- Retail 6.0.2+: 1 DPS на 3.5 AP. :conte
 local PET_INHERIT = 0.70             -- 70% силы владельца для петов (требование ТЗ)
 local AOE_CAP_DEFAULT = 8            -- мягкий кап целей
 local VARIANCE_PCT = 0.25            -- ±25% дисперсия
-
-local playerCooldowns = {}           -- GUID → { [blessingID]=lastCast }
 
 function clamp(x, lo, hi) return (x<lo and lo) or (x>hi and hi) or x end
 function rand_pm(x) return 1 + (math.random(-x, x) * 0.01) end
@@ -666,216 +797,33 @@ function PatronCalc_SingleBudget(caster, info)
   return math.floor(clamp(budget, 1, 500000))
 end
 
-local ServerBlessingsConfig = {
-  [1101] = { -- BUFF
-    name = "Благословение Силы",
-    description = "Придает вам неимоверную силу!",
-    spell_id = 48743,
-    is_offensive = false, requires_target = false, is_aoe = false,
-    cooldown_seconds = 60,
-    cost_item_id = 500000, cost_amount = 0,
-  },
+-- Загружаем данные благословений из файла данных
+local BlessingsData = require("data.data_blessings")
 
-  [1102] = { -- BUFF
-    name = "Благословение Стойкости",
-    description = "Повышает вашу выносливость и живучесть!",
-    spell_id = 132959,
-    is_offensive = false, requires_target = false, is_aoe = false,
-    cooldown_seconds = 20,
-    cost_item_id = 500000, cost_amount = 0,
-  },
+-- Используем загруженные данные как конфигурацию сервера
+PatronGameLogicCore.ServerBlessingsConfig = BlessingsData
 
-  [1201] = { -- SINGLE
-    name = "Благословение Атаки",
-    description = "Призывает мощный удар по врагу!",
-    spell_id = 133,  -- визуал (опционально)
-    is_offensive = true, requires_target = true, is_aoe = false,
-    cooldown_seconds = 10, range = 40.0,
-    cost_item_id = 500000, cost_amount = 0,
-    -- эффект урона — в какой слот bp подставлять рассчитанное значение
-    effect = 25, effect2 = nil, effect3 = nil,
-    dmg_effect = "effect",
-    currencyK = 2.9,
-  },
-
-  [1001] = { -- AOE
-    name = "Благословение Ливня",
-    description = "Призывает мощный удар по площади на последней позиции врага",
-    spell_id = 190356,          -- визуал на землю
-    spell_tick_id = 228599,     -- тик-спелл
-    is_offensive = true, is_aoe = true, requires_target = true,
-    radius = 10.0, tick_ms = 500, duration_ms = 14000,
-    cooldown_seconds = 12, range = 40.0,
-    cost_item_id = 500000, cost_amount = 0,
-    effect = 25, effect2 = nil, effect3 = nil,  -- базовая «искра»
-    dmg_effect = "effect",
-    currencyK = 2.9,
-    aoe_cap_targets = 8
-  },
-}
-
--- ======================= [ ROUTER ] =============================
-
-local BlessingsHandler = AIO.AddHandlers("blessings", {})
-
--- Серверная функция для запроса благословения с клиента
-function BlessingsHandler.RequestBlessing(player, data)
-    print("----------------------------------------------------------------")
-    print("[BlessingUI - Server DEBUG] -- Начало RequestBlessing --")
-
-    local success_pcall, result_pcall = pcall(function()
-        local playerName = tostring(player:GetName())
-        print("[BlessingUI - Server DEBUG] Получен запрос от: " .. playerName)
-        print("[BlessingUI - Server DEBUG] Данные запроса: " .. tostring(data.blessingID))
-
-        local blessingID = data.blessingID
-        local info = ServerBlessingsConfig[blessingID]
-
-        if not info then
-            player:SendBroadcastMessage("Неизвестное благословение.")
-            print("[BlessingUI - Server DEBUG] ОШИБКА: Неизвестное благословение ID: " .. tostring(blessingID))
-            return
-        end
-        print("[BlessingUI - Server DEBUG] Благословение найдено: " .. info.name .. " (Spell ID: " .. tostring(info.spell_id) .. ")")
-
-        -- === ЛОГИКА ОБРАБОТКИ ЦЕЛИ === (встроенная как в старом коде)
-        local finalSpellTarget = player -- По умолчанию цель - сам игрок
-
-        if info.requires_target then
-            local targetUnit = player:GetSelection()
-
-            if not targetUnit or not targetUnit:IsInWorld() then
-                player:SendBroadcastMessage("Вам нужно выбрать цель для этого благословения, " .. info.name .. ".")
-                print("[BlessingUI - Server DEBUG] ОШИБКА: Нет выбранной цели или цель не находится в мире.")
-                return
-            end
-
-            finalSpellTarget = targetUnit
-
-            if info.is_offensive then
-                -- 1. Проверка на атаку самого себя
-                if targetUnit:GetGUID() == player:GetGUID() then
-                    player:SendBroadcastMessage(("Вы не можете атаковать себя с помощью %s!"):format(info.name))
-                    print("[BlessingUI - Server DEBUG] ОШИБКА: Попытка атаковать себя.")
-                    return
-                end
-
-                -- 2. Проверка дружебности
-                local checkRadius = 60.0
-                local friendlyUnits = player:GetFriendlyUnitsInRange(checkRadius)
-                local count = (friendlyUnits and #friendlyUnits) or 0
-                print("[BlessingUI] Дружественных: "..count)
-
-                local isTargetFriendly = false
-                if friendlyUnits then
-                  for _, unit in ipairs(friendlyUnits) do
-                    if unit and unit:GetGUID() == targetUnit:GetGUID() then
-                      isTargetFriendly = true
-                      break
-                    end
-                  end
-                end
-
-                if isTargetFriendly then
-                    player:SendBroadcastMessage("Вы не можете атаковать дружественную цель с помощью " .. info.name .. "!")
-                    print("[BlessingUI - Server DEBUG] ОШИБКА: Попытка атаковать дружественную цель (найдена в списке дружественных).")
-                    return
-                end
-
-                -- 3. Проверка, жива ли цель
-                if not targetUnit:IsAlive() then
-                    player:SendBroadcastMessage("Ваша цель мертва.")
-                    print("[BlessingUI - Server DEBUG] ОШИБКА: Цель мертва.")
-                    return
-                end
-
-                -- 4. Проверка "атакуемости"
-                local success, isTargetable = pcall(targetUnit.IsTargetableForAttack, targetUnit)
-                if success and not isTargetable then
-                    player:SendBroadcastMessage("Эту цель нельзя атаковать.")
-                    print("[BlessingUI - Server DEBUG] ОШИБКА: Цель не является атакуемой (IsTargetableForAttack вернул false).")
-                    return
-                end
-                
-                -- 5. Проверка дистанции
-                local max_range = info.range or 40.0
-                if player:GetDistance(targetUnit) > max_range then
-                    player:SendBroadcastMessage("Ваша цель находится слишком далеко.")
-                    print("[BlessingUI - Server DEBUG] ОШИБКА: Цель слишком далеко.")
-                    return
-                end
-            end
-        end
-        print("[BlessingUI - Server DEBUG] Обработка цели завершена. Конечная цель: " .. tostring(finalSpellTarget:GetName()))
-
-        -- === ПРОВЕРКИ ИГРОКА === (встроенные как в старом коде)
-        
-        -- Проверка активности ауры (только для не-атакующих)
-        if not info.is_offensive and info.spell_id and finalSpellTarget:HasAura(info.spell_id) then
-            player:SendBroadcastMessage(("%s уже активен!"):format(info.name))
-            print("[BlessingUI - ServerDEBUG] Благословение уже активно.")
-            return
-        end
-
-        -- Проверка кулдауна
-        local playerGUID = player:GetGUIDLow()
-        if not playerCooldowns[playerGUID] then playerCooldowns[playerGUID] = {} end
-        local lastCastTime = playerCooldowns[playerGUID][blessingID] or 0
-        local currentTime = os.time()
-
-        if currentTime - lastCastTime < info.cooldown_seconds then
-            local remainingTime = info.cooldown_seconds - (currentTime - lastCastTime)
-            player:SendBroadcastMessage(("Вы не можете использовать %s еще %.0f сек."):format(info.name, remainingTime))
-            print("[BlessingUI - Server DEBUG] Благословение на кулдауне. Осталось: " .. remainingTime .. " сек.")
-            return
-        end
-        print("[BlessingUI - Server DEBUG] Проверка кулдауна пройдена.")
-
-        -- Проверка и списание стоимости
-        if info.cost_item_id and info.cost_amount > 0 then
-            if player:GetItemCount(info.cost_item_id) < info.cost_amount then
-                player:SendBroadcastMessage("Вам не хватает реагентов для этого благословения.")
-                print("[BlessingUI - Server DEBUG] Недостаточно предметов.")
-                return
-            end
-            player:RemoveItem(info.cost_item_id, info.cost_amount)
-            print("[BlessingUI - Server DEBUG] Предметы списаны.")
-        end
-
-        -- === ПРИМЕНЕНИЕ ЭФФЕКТА ===
-        if info.is_aoe then
-            -- Используем стабильную StartGroundAoE (как в старом коде)
-            StartGroundAoE(player, finalSpellTarget, info)
-        elseif info.is_offensive then
-            -- Динамический расчет урона для single атаки
-            local singleDamage = PatronCalc_SingleBudget(player, info)
-            local bp0, bp1, bp2 = build_bp_triplet(info, singleDamage)
-            local tickId = info.spell_tick_id or info.spell_id
-            if tickId and tickId > 0 then
-                pcall(player.CastCustomSpell, player, finalSpellTarget, tickId, true, bp0, bp1, bp2)
-                print(("[BlessingUI - Server DEBUG] Single attack: damage=%d"):format(singleDamage))
-            end
-        else
-            DoBuff(player, finalSpellTarget, info)
-        end
-
-        -- Считаем операцию успешной
-        local playerGUID = player:GetGUIDLow()
-        if not playerCooldowns[playerGUID] then playerCooldowns[playerGUID] = {} end
-        playerCooldowns[playerGUID][blessingID] = os.time()
-        player:SendBroadcastMessage(("Вы успешно использовали %s!"):format(info.name))
-        print("[BlessingUI - Server DEBUG] УСПЕХ: " .. playerName .. " использовал " .. info.name)
-        
-    end) -- Конец корневого pcall
-
-    if not success_pcall then
-        print("[BlessingUI - Server DEBUG] КРИТИЧЕСКАЯ ОШИБКА в RequestBlessing: " .. tostring(result_pcall))
-        if player and pcall(player.GetName, player) then
-            player:SendBroadcastMessage("На сервере произошла критическая ошибка при обработке вашего запроса.")
-        end
+-- Логируем загруженные благословения
+if PatronGameLogicCore.ServerBlessingsConfig then
+    local count = 0
+    local ids = {}
+    for id, data in pairs(PatronGameLogicCore.ServerBlessingsConfig) do
+        count = count + 1
+        table.insert(ids, tostring(id))
     end
-    print("----------------------------------------------------------------")
+    PatronLogger:Info("GameLogicCore", "Initialize", "ServerBlessingsConfig loaded from data_blessings", {
+        blessing_count = count,
+        blessing_ids = table.concat(ids, ", ")
+    })
+else
+    PatronLogger:Error("GameLogicCore", "Initialize", "Failed to load ServerBlessingsConfig from data_blessings")
+    error("ServerBlessingsConfig не загружен! Проверьте файл data/data_blessings.lua")
 end
+
+-- Кэш кулдаунов для игроков (для небольших серверов 10-20 игроков)  
+PatronGameLogicCore.playerCooldowns = {}           -- GUID → { [blessingID]=lastCast }
+
+-- ======================= [ BLESSING MECHANICS FUNCTIONS ] =============================
 
 -- Преобразование «бюджета одиночки» в АоЕ-тик (раздача по целям + мягкий кап)
 function AoE_tick_from_single(singleBudget, targetsCount, capTargets, aoeMult)

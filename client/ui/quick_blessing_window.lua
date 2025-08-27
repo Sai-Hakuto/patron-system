@@ -109,6 +109,9 @@ function NS.QuickBlessingWindow:Show(payload)
     self:CreateBlessingButtons()
     self:AdjustWindowSize()
     self:UpdatePlayerPortrait()
+    
+    -- Запрашиваем текущие кулдауны при показе панели
+    self:RequestCooldownUpdate()
 end
 
 --[[==========================================================================
@@ -200,6 +203,13 @@ function NS.QuickBlessingWindow:CreateBlessingButtons()
         button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
         button:GetHighlightTexture():SetBlendMode("ADD")
 
+        -- Cooldown overlay (как в стандартных ActionButton)
+        local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+        cooldown:SetAllPoints(button)
+        cooldown:SetDrawEdge(false)
+        cooldown:SetHideCountdownNumbers(false)
+        button.cooldown = cooldown
+
         -- Настраиваем тултип
         button:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -211,6 +221,13 @@ function NS.QuickBlessingWindow:CreateBlessingButtons()
         -- Обработчик клика (как в client_solution)
         button:SetScript("OnClick", function()
             NS.Logger:Info("QuickBlessingWindow: нажато благословение " .. blessing.name .. " (ID: " .. blessing.id .. ")")
+            
+            -- Проверяем кулдаун перед отправкой запроса
+            if button.cooldown and button.cooldown:GetCooldownDuration() > 0 then
+                NS.Logger:Debug("QuickBlessingWindow: благословение на кулдауне")
+                return
+            end
+            
             self:RequestBlessing(blessing)
         end)
         
@@ -229,11 +246,16 @@ end
 function NS.QuickBlessingWindow:RequestBlessing(blessing)
     -- Используем ту же логику что и в client_solution
     if AIO and AIO.Handle then
-        AIO.Handle("blessings", "RequestBlessing", {
+        AIO.Handle("PatronSystem", "RequestBlessing", {
             blessingID = blessing.id,
             -- Можно добавить дополнительные модификаторы если нужно
         })
         NS.Logger:Info("QuickBlessingWindow: отправлен запрос благословения " .. blessing.id)
+        
+        -- После отправки запроса обновляем кулдауны через небольшую задержку
+        C_Timer.After(0.5, function()
+            self:RequestCooldownUpdate()
+        end)
     else
         NS.Logger:Error("QuickBlessingWindow: AIO.Handle недоступен!")
         if NS.UIManager then
@@ -315,6 +337,42 @@ end
 function NS.QuickBlessingWindow:UpdatePlayerPortrait()
     if self.elements.portrait then
         SetPortraitTexture(self.elements.portrait, "player")
+    end
+end
+
+--[[==========================================================================
+  ОБНОВЛЕНИЕ КУЛДАУНОВ
+============================================================================]]
+function NS.QuickBlessingWindow:UpdateCooldowns(cooldownData)
+    if not self.buttons or not cooldownData then 
+        return 
+    end
+    
+    for _, button in ipairs(self.buttons) do
+        if button.blessingData and button.cooldown then
+            local blessingId = button.blessingData.id
+            local cooldownInfo = cooldownData[blessingId]
+            
+            if cooldownInfo and cooldownInfo.remaining > 0 then
+                -- Запускаем анимацию кулдауна
+                local startTime = GetTime() - (cooldownInfo.duration - cooldownInfo.remaining)
+                button.cooldown:SetCooldown(startTime, cooldownInfo.duration)
+                button:Disable() -- Блокируем кнопку
+                NS.Logger:Debug("QuickBlessingWindow: кулдаун для " .. blessingId .. " - " .. cooldownInfo.remaining .. "с")
+            else
+                -- Очищаем кулдаун
+                button.cooldown:Clear()
+                button:Enable()
+            end
+        end
+    end
+end
+
+function NS.QuickBlessingWindow:RequestCooldownUpdate()
+    -- Запрашиваем текущие кулдауны с сервера
+    if AIO and AIO.Handle then
+        AIO.Handle("PatronSystem", "RequestCooldowns", {})
+        NS.Logger:Debug("QuickBlessingWindow: запрошены кулдауны с сервера")
     end
 end
 

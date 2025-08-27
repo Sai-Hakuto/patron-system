@@ -291,6 +291,16 @@ local function RegisterAIOHandlers()
 					(data.isInPanel and "добавлено в панель" or "убрано из панели"))
 			end
 		end,
+		
+		-- НОВОЕ: Обновление кулдаунов благословений
+		UpdateCooldowns = function(_, cooldownData)
+			PatronSystemNS.Logger:AIO("Получены данные кулдаунов, количество: " .. table.getn(cooldownData))
+			
+			-- Обновляем кулдауны в QuickBlessingWindow
+			if PatronSystemNS.QuickBlessingWindow and PatronSystemNS.QuickBlessingWindow.UpdateCooldowns then
+				PatronSystemNS.QuickBlessingWindow:UpdateCooldowns(cooldownData)
+			end
+		end,
         
         -- ТЕСТОВЫЕ ОТВЕТЫ
         TestResponse = function(_, message)
