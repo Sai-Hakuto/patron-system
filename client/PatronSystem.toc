@@ -31,6 +31,9 @@ ui/follower_window.lua
 # НОВОЕ: Окно благословений
 ui/blessing_window.lua
 
+# НОВОЕ: Быстрая панель благословений
+ui/quick_blessing_window.lua
+
 # НОВОЕ: Окно магазина
 ui/shop_window.lua
 

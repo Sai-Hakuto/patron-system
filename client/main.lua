@@ -368,55 +368,296 @@ local function RegisterModuleListeners()
             PatronSystemNS.BlessingWindow:LoadPanelState()
             PatronSystemNS.Logger:Info("Окно благословений и панель обновлены")
         end
+        
+        -- Обновляем панель управления
+        if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.UpdateAvailability then
+            PatronSystemNS.ControlPanel.UpdateAvailability()
+            PatronSystemNS.Logger:Info("Панель управления обновлена")
+        end
+        
+        -- Обновляем быструю панель благословений
+        if PatronSystemNS.QuickBlessingWindow and PatronSystemNS.QuickBlessingWindow.RefreshData then
+            PatronSystemNS.QuickBlessingWindow:RefreshData()
+            PatronSystemNS.Logger:Info("Быстрая панель благословений обновлена")
+        end
+    end)
+    
+    -- Слушатель для инициализации игрока - обновляем панель
+    EventDispatcher:RegisterListener("PlayerInitialized", "ControlPanel", function(data)
+        PatronSystemNS.Logger:Info("Игрок инициализирован - обновляем панель управления")
+        
+        -- Небольшая задержка чтобы данные успели загрузиться
+        C_Timer.After(1, function()
+            if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.UpdateAvailability then
+                PatronSystemNS.ControlPanel.UpdateAvailability()
+                PatronSystemNS.Logger:Info("Панель управления обновлена после инициализации")
+            end
+        end)
     end)
     
     PatronSystemNS.Logger:Info("Слушатели модулей зарегистрированы (ИСПРАВЛЕНИЕ)Этап 5")
 end
 
 --[[==========================================================================
+  ФУНКЦИИ ПРОВЕРКИ ДОСТУПНОСТИ КНОПОК
+============================================================================]]
+local function CheckFollowersAvailability()
+    -- Проверяем есть ли у игрока доступ к фолловерам в кэше
+    local progress = PatronSystemNS.DataManager:GetPlayerProgress()
+    if not progress then 
+        PatronSystemNS.Logger:Debug("CheckFollowersAvailability: нет данных прогресса")
+        return false 
+    end
+    
+    -- Проверяем наличие фолловеров (можно проверить конкретное поле или флаг)
+    local hasFollowers = progress.followersUnlocked or (progress.followers and next(progress.followers) ~= nil)
+    PatronSystemNS.Logger:Debug("CheckFollowersAvailability: " .. (hasFollowers and "доступны" or "недоступны"))
+    return hasFollowers
+end
+
+local function CheckBlessingPanelAvailability()
+    -- Проверяем есть ли у игрока благословения с флагом isInPanel (camelCase как в blessing_window)
+    local progress = PatronSystemNS.DataManager:GetPlayerProgress()
+    if not progress or not progress.blessings then 
+        PatronSystemNS.Logger:Debug("CheckBlessingPanelAvailability: нет данных прогресса или благословений")
+        return false 
+    end
+    
+    -- Проверяем наличие благословений с флагом isInPanel = true
+    for blessingId, blessing in pairs(progress.blessings) do
+        if blessing.isInPanel and blessing.isDiscovered then
+            PatronSystemNS.Logger:Debug("CheckBlessingPanelAvailability: найдено благословение в панели: " .. tostring(blessingId))
+            return true
+        end
+    end
+    
+    PatronSystemNS.Logger:Debug("CheckBlessingPanelAvailability: не найдено активных благословений в панели")
+    return false
+end
+
+--[[==========================================================================
   СОЗДАНИЕ ГЛАВНОГО UI
 ============================================================================]]
 local function CreateMainUI()
-    -- Создаем главную кнопку с защитой от ошибок
-    PatronSystemNS.Logger:Debug("Создание главной кнопки...")
+    -- Создаем компактную панель управления с квадратными кнопками
+    PatronSystemNS.Logger:Debug("Создание компактной панели управления...")
     
-    local mainButton = CreateFrame("Button", "PatronMainButton", UIParent, "UIPanelButtonTemplate")
-    mainButton:SetSize(120, 24)
-    mainButton:SetText("Покровители")
-    mainButton:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
+    -- Главная панель
+    local mainPanel = CreateFrame("Frame", "PatronControlPanel", UIParent, "BackdropTemplate")
+    mainPanel:SetSize(200, 70) -- увеличена ширина и высота для заголовка
+    mainPanel:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
+    mainPanel:SetMovable(true)
+    mainPanel:EnableMouse(true)
+    mainPanel:RegisterForDrag("LeftButton")
+    mainPanel:SetScript("OnDragStart", mainPanel.StartMoving)
+    mainPanel:SetScript("OnDragStop", mainPanel.StopMovingOrSizing)
     
-    mainButton:SetScript("OnClick", function() 
-        PatronSystemNS.Logger:Debug("=== КНОПКА НАЖАТА ===")
+    -- Фон панели (непрозрачный как в client_solution)
+    local bg = mainPanel:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(true)
+    bg:SetColorTexture(0.08, 0.08, 0.1, 0.95) -- почти непрозрачный темный фон
+    
+    -- Заголовок панели
+    local title = mainPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", mainPanel, "TOP", 0, -8)
+    title:SetText("Patron System")
+    title:SetTextColor(0.8, 0.8, 0.9, 1)
+    
+    -- Конфигурация кнопок
+    local buttonConfig = {
+        {
+            id = "main",
+            text = "M",
+            tooltip = "Главное окно покровителей",
+            color = PatronSystemNS.Config:GetColor("patronVoid"),
+            onClick = function()
+                PatronSystemNS.Logger:Info("Нажата кнопка Main Window")
+                if PatronSystemNS.UIManager and PatronSystemNS.UIManager.ToggleMainWindow then
+                    PatronSystemNS.UIManager:ToggleMainWindow()
+                else
+                    PatronSystemNS.Logger:Error("UIManager или ToggleMainWindow не доступны!")
+                end
+            end
+        },
+        {
+            id = "followers",
+            text = "F",
+            tooltip = "Управление фолловерами",
+            color = PatronSystemNS.Config:GetColor("patronDragon"),
+            checkAvailability = CheckFollowersAvailability,
+            onClick = function()
+                PatronSystemNS.Logger:Info("Нажата кнопка Followers")
+                if CheckFollowersAvailability() then
+                    PatronSystemNS.UIManager:ShowMessage("Панель фолловеров будет реализована позже", "info")
+                else
+                    PatronSystemNS.UIManager:ShowMessage("Невозможно открыть панель фолловеров - они не открыты", "error")
+                end
+            end
+        },
+        {
+            id = "blessings",
+            text = "B",
+            tooltip = "Быстрая панель благословений",
+            color = PatronSystemNS.Config:GetColor("patronEluna"),
+            checkAvailability = CheckBlessingPanelAvailability,
+            onClick = function()
+                PatronSystemNS.Logger:Info("Нажата кнопка Blessings")
+                if CheckBlessingPanelAvailability() then
+                    -- Открываем быструю панель благословений
+                    if PatronSystemNS.QuickBlessingWindow then
+                        PatronSystemNS.QuickBlessingWindow:Toggle()
+                    else
+                        PatronSystemNS.Logger:Error("QuickBlessingWindow не загружен!")
+                        PatronSystemNS.UIManager:ShowMessage("Ошибка загрузки панели благословений", "error")
+                    end
+                else
+                    PatronSystemNS.UIManager:ShowMessage("Невозможно открыть панель благословений - нет активных благословений", "error")
+                end
+            end
+        }
+    }
+    
+    -- Создание кнопок
+    local buttonSize = 40
+    local spacing = 12 -- увеличенный интервал между кнопками
+    local startX = (mainPanel:GetWidth() - (3 * buttonSize + 2 * spacing)) / 2
+    
+    for i, config in ipairs(buttonConfig) do
+        local button = CreateFrame("Button", "PatronControlButton_" .. config.id, mainPanel, "BackdropTemplate")
+        button:SetSize(buttonSize, buttonSize)
+        button:SetPoint("TOPLEFT", mainPanel, "TOPLEFT", startX + (i - 1) * (buttonSize + spacing), -26) -- сдвинуты ниже для заголовка
         
-        local success, err = pcall(function()
-            PatronSystemNS.Logger:Info("Нажата главная кнопка 'Покровители'")
-            
-            -- ИСПРАВЛЕНИЕ: Проверяем существование UIManager и метода
-            if not PatronSystemNS.UIManager then
-                PatronSystemNS.Logger:Error("UIManager не загружен!")
-                print("|cffff0000[ERROR]|r UIManager не загружен!")
-                return
+        -- Фон кнопки в стиле баннеров
+        button:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true,
+            tileSize = 16,
+            edgeSize = 12,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 }
+        })
+        
+        -- Применяем цвета в стиле баннеров
+        local C = config.color
+        local S = PatronSystemNS.UIStyle or { BASE_MULT = 0.30, HOVER_MULT = 0.60, FLASH_ALPHA = 0.80, FLASH_TIME = 0.10 }
+        
+        -- Текст кнопки
+        local text = button:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        text:SetPoint("CENTER", button, "CENTER", 0, 0)
+        text:SetText(config.text)
+        button.title = text
+        
+        -- Проверяем доступность кнопки (кнопка [M] всегда доступна)
+        local isAvailable = true
+        if config.checkAvailability then
+            isAvailable = config.checkAvailability()
+        end
+        
+        -- Функция для установки базового цвета
+        local function setBaseColor()
+            if isAvailable then
+                button:SetBackdropColor(C.r * S.BASE_MULT, C.g * S.BASE_MULT, C.b * S.BASE_MULT, 0.8)
+                button:SetBackdropBorderColor(C.r, C.g, C.b, 1)
+                text:SetTextColor(C.r, C.g, C.b, 1)
+            else
+                -- Заблокированный вид - серый и тусклый
+                button:SetBackdropColor(0.2, 0.2, 0.2, 0.6)
+                button:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
+                text:SetTextColor(0.5, 0.5, 0.5, 0.8)
             end
-            
-            if not PatronSystemNS.UIManager.ToggleMainWindow then
-                PatronSystemNS.Logger:Error("Метод ToggleMainWindow не найден!")
-                print("|cffff0000[ERROR]|r Метод ToggleMainWindow не найден!")
-                return
+        end
+        
+        -- Функция обновления доступности (будет вызываться при изменении данных)
+        button.UpdateAvailability = function()
+            if config.checkAvailability then
+                isAvailable = config.checkAvailability()
             end
-            
-            -- Обычный вызов если всё в порядке
-            PatronSystemNS.UIManager:ToggleMainWindow()
+            setBaseColor()
+        end
+        
+        -- ИСПРАВЛЕНИЕ: Принудительно устанавливаем цвет в следующем фрейме
+        -- чтобы избежать проблем с инициализацией цветовой схемы
+        C_Timer.After(0.1, function()
+            setBaseColor()
         end)
         
-        if not success then
-            print("|cffff0000[ERROR]|r Ошибка в OnClick: " .. tostring(err))
-            PatronSystemNS.Logger:Error("Ошибка в OnClick: " .. tostring(err))
-        else
-            PatronSystemNS.Logger:Debug("OnClick выполнен успешно")
+        -- Тултип с информацией о блокировке
+        button:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(config.tooltip)
+            if not isAvailable then
+                GameTooltip:AddLine("Недоступно", 1, 0.3, 0.3) -- красный текст для заблокированных
+            end
+            GameTooltip:Show()
+            
+            -- Цвет при наведении только для доступных кнопок
+            if isAvailable then
+                button:SetBackdropColor(C.r * S.HOVER_MULT, C.g * S.HOVER_MULT, C.b * S.HOVER_MULT, 1.0)
+                button:SetBackdropBorderColor(1, 1, 1, 1)
+                text:SetTextColor(1, 1, 1, 1)
+            end
+        end)
+        
+        button:SetScript("OnLeave", function(self)
+            GameTooltip:Hide()
+            -- Возврат к базовому цвету
+            setBaseColor()
+        end)
+        
+        button:SetScript("OnClick", function()
+            -- Обновляем статус доступности перед кликом
+            if config.checkAvailability then
+                isAvailable = config.checkAvailability()
+            end
+            
+            if not isAvailable then
+                -- Для заблокированных кнопок - никаких эффектов, только выполняем onClick
+                if config.onClick then config.onClick() end
+                return
+            end
+            
+            -- Эффект вспышки только для доступных кнопок
+            button:SetBackdropColor(1, 1, 1, S.FLASH_ALPHA)
+            text:SetTextColor(0, 0, 0, 1)
+            
+            C_Timer.After(S.FLASH_TIME, function()
+                setBaseColor()
+                if config.onClick then config.onClick() end
+            end)
+        end)
+    end
+    
+    -- Сохраняем панель для возможности обновления
+    PatronSystemNS.ControlPanel = {
+        frame = mainPanel,
+        buttons = {},
+        UpdateAvailability = function()
+            for _, btn in pairs(PatronSystemNS.ControlPanel.buttons) do
+                if btn.UpdateAvailability then
+                    btn.UpdateAvailability()
+                end
+            end
+        end
+    }
+    
+    -- Сохраняем кнопки для обновления
+    for i, config in ipairs(buttonConfig) do
+        local buttonName = "PatronControlButton_" .. config.id
+        local btn = _G[buttonName]
+        if btn then
+            PatronSystemNS.ControlPanel.buttons[config.id] = btn
+        end
+    end
+    
+    -- ИСПРАВЛЕНИЕ: Дополнительное обновление цветов после создания всех кнопок
+    C_Timer.After(0.2, function()
+        PatronSystemNS.Logger:Debug("Обновление цветов панели управления...")
+        if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.UpdateAvailability then
+            PatronSystemNS.ControlPanel.UpdateAvailability()
         end
     end)
     
-    PatronSystemNS.Logger:Debug("Главная кнопка создана с улучшенной защитой")
+    PatronSystemNS.Logger:Debug("Компактная панель управления создана")
     
     -- Регистрация слеш-команд
     PatronSystemNS.Logger:Debug("Регистрация слеш-команд...")
@@ -570,15 +811,10 @@ local function Initialize()
     if PatronSystemNS.FollowerWindow.Initialize then
         PatronSystemNS.FollowerWindow:Initialize()
     end
-	
-	if PatronSystemNS.PatronWindow.Initialize then
-        PatronSystemNS.PatronWindow:Initialize()
-    end
     
-    if PatronSystemNS.FollowerWindow.Initialize then
-        PatronSystemNS.FollowerWindow:Initialize()
+    if PatronSystemNS.QuickBlessingWindow.Initialize then
+        PatronSystemNS.QuickBlessingWindow:Initialize()
     end
-	
 
     
     -- 3. ЭТАП 4: Регистрируем централизованную систему событий

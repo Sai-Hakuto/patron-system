@@ -34,10 +34,10 @@ end
 ------------------------------------------------------------
 -- type: "buff" (на себя), "single" (по цели), "aoe"
 local BlessingsConfig = {
-    { id = "blessing_power",   name = "Благословение Силы",      icon = "Interface\\Icons\\Spell_Holy_FistOfJustice",   type = "buff"  },
-    { id = "blessing_stamina", name = "Благословение Стойкости", icon = "Interface\\Icons\\Spell_Holy_WordFortitude",   type = "buff"  },
-    { id = "blessing_attack",  name = "Благословение Атаки",     icon = "Interface\\Icons\\Ability_GhoulFrenzy",        type = "single"},
-    { id = "blessing_aoe",     name = "Ливень (тест AoE)",       icon = "Interface\\Icons\\Spell_Frost_IceStorm",       type = "aoe"   },
+    { id = 1101,   name = "Благословение Силы",      icon = "Interface\\Icons\\Spell_Holy_FistOfJustice",   type = "buff"  },
+    { id = 1102, name = "Благословение Стойкости", icon = "Interface\\Icons\\Spell_Holy_WordFortitude",   type = "buff"  },
+    { id = 1201,  name = "Благословение Атаки",     icon = "Interface\\Icons\\Ability_GhoulFrenzy",        type = "single"},
+    { id = 2001,     name = "Ливень (тест AoE)",       icon = "Interface\\Icons\\Spell_Frost_IceStorm",       type = "aoe"   },
 }
 
 ------------------------------------------------------------
@@ -66,6 +66,35 @@ title:SetText("Благословения")
 local playerPortrait = blessingMainFrame:CreateTexture("BlessingUIPortraitTexture", "ARTWORK")
 playerPortrait:SetSize(36, 36)
 playerPortrait:SetPoint("TOPLEFT", 10, -42)
+
+local owner = blessingMainFrame  -- твой главный фрейм панели
+
+local function ApplyOverrides()
+  if InCombatLockdown() then
+    print("|cffff5555[Patron] Нельзя менять бинды в бою|r")
+    return
+  end
+  ClearOverrideBindings(owner)
+  SetOverrideBindingClick(owner, true, "SHIFT-1", "BlessingButton1", "LeftButton")
+  SetOverrideBindingClick(owner, true, "SHIFT-2", "BlessingButton2", "LeftButton")
+  SetOverrideBindingClick(owner, true, "SHIFT-3", "BlessingButton3", "LeftButton")
+  SetOverrideBindingClick(owner, true, "SHIFT-4", "BlessingButton4", "LeftButton")
+end
+
+local function ClearOverrides()
+  ClearOverrideBindings(owner)
+end
+
+-- включаем/выключаем при показе/скрытии панели
+blessingMainFrame:SetScript("OnShow", ApplyOverrides)
+blessingMainFrame:SetScript("OnHide", ClearOverrides)
+
+-- если окно открыто и бой закончился — повторно навесим бинды
+local evt = CreateFrame("Frame")
+evt:RegisterEvent("PLAYER_REGEN_ENABLED")
+evt:SetScript("OnEvent", function()
+  if blessingMainFrame:IsShown() then ApplyOverrides() end
+end)
 
 local function UpdatePlayerPortrait()
     if playerPortrait then
