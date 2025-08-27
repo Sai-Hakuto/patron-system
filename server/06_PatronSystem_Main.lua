@@ -791,7 +791,7 @@ HandlePlayerChoice = function(player, choiceNodeId)
             success = actionResult.success,
             message = actionResult.success and "Действия выполнены успешно" or actionResult.error,
             results = actionResult.results,
-            progressData = playerProgress
+            progressData = BuildProgressSnapshot(playerGuid, playerProgress)
         })
         
         -- Проверяем нужна ли перезагрузка данных после разблокировки благословений
