@@ -209,6 +209,10 @@ function NS.QuickBlessingWindow:CreateBlessingButtons()
         cooldown:SetDrawEdge(false)
         cooldown:SetHideCountdownNumbers(false)
         button.cooldown = cooldown
+        cooldown:SetScript("OnCooldownDone", function()
+            button.cooldown:Clear()
+            button:Enable()
+        end)
 
         -- Настраиваем тултип
         button:SetScript("OnEnter", function(self)
