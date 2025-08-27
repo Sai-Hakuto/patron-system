@@ -263,6 +263,19 @@ function PatronSystemNS.UIManager:ShowBlessingWindow()
     self:RegisterWindow(PatronSystemNS.Config.WindowType.BLESSING, PatronSystemNS.BlessingWindow)
 end
 
+function PatronSystemNS.UIManager:ShowBlessingWindowSmart()
+    -- Эта функция используется из MainWindow для кнопки "Blessings"
+    if PatronSystemNS.BlessingWindow and PatronSystemNS.BlessingWindow:IsShown() then
+        PatronSystemNS.Logger:UI("Окно благословений уже открыто, скрываем")
+        PatronSystemNS.BlessingWindow:Hide()
+        return
+    end
+
+    -- Окно закрыто - открываем
+    PatronSystemNS.Logger:UI("Открываем окно благословений")
+    self:ShowBlessingWindow()
+end
+
 function PatronSystemNS.UIManager:ShowShopWindow()
     if not PatronSystemNS.ShopWindow then
         PatronSystemNS.Logger:Error("ShopWindow не загружен!")

@@ -113,7 +113,6 @@ function NS.BlessingWindow:Show(payload)
   if not self.currentCategory then self.currentCategory = "Defensive" end
   self:LoadPanelState()
   self:SelectCategory(self.currentCategory)
-  if NS.UIManager then NS.UIManager:ShowMessage("Окно благословений открыто", "success") end
 end
 function NS.BlessingWindow:Hide()   BW.prototype.Hide(self)   end
 function NS.BlessingWindow:Toggle(p) BW.prototype.Toggle(self, p) end

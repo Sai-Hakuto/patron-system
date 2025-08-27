@@ -6,7 +6,25 @@
 local NS = PatronSystemNS
 
 NS.BaseWindow = {
-  prototype = {}
+  prototype = {},
+  
+  -- Система позиционирования окон
+  positioning = {
+    windowOrder = {}, -- порядок создания окон для каскада
+    positions = {},   -- кэш вычисленных позиций
+    
+    -- Базовые параметры
+    mainWindow = {
+      leftPercent = 5,   -- 5% от левого края экрана
+      topPercent = 8     -- 8% от верха экрана
+    },
+    
+    cascade = {
+      offsetX = 50,      -- горизонтальный отступ между окнами
+      offsetY = 30,      -- вертикальный отступ при переносе на новую строку
+      maxWidth = 80      -- максимальная ширина в % экрана для каскада
+    }
+  }
 }
 NS.BaseWindow.prototype.__index = NS.BaseWindow.prototype
 
@@ -33,6 +51,80 @@ NS.CurrencyIcons = NS.CurrencyIcons or {
   Suffering = "Interface\\MoneyFrame\\UI-GoldIcon",
   Draconic = "Interface\\MoneyFrame\\UI-GoldIcon",
 }
+
+--- Вычисляет стартовую позицию для нового окна
+function NS.BaseWindow:CalculateStartPosition(windowName, windowWidth, windowHeight)
+  local pos = self.positioning
+  local screenWidth = GetScreenWidth()
+  local screenHeight = GetScreenHeight()
+  
+  -- Специальные случаи
+  if windowName == "MainWindow" then
+    local x = screenWidth * pos.mainWindow.leftPercent / 100
+    local y = screenHeight * pos.mainWindow.topPercent / 100
+    return "TOPLEFT", UIParent, "TOPLEFT", x, -y
+  end
+  
+  if windowName == "QuickBlessingWindow" then
+    -- Позиция под панелью управления (найдем панель управления)
+    if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.frame then
+      local panel = PatronSystemNS.ControlPanel.frame
+      local point, relativeTo, relativePoint, px, py = panel:GetPoint()
+      if point and px and py then
+        -- Размещаем под панелью с небольшим отступом
+        return "TOPLEFT", UIParent, "TOPLEFT", px, py - panel:GetHeight() - 10
+      end
+    end
+    
+    -- Фолбек: центр экрана снизу  
+    return "BOTTOM", UIParent, "BOTTOM", 0, 100
+  end
+  
+  -- Обычные окна: каскадное позиционирование
+  return self:CalculateCascadePosition(windowName, windowWidth or 550, windowHeight or 500)
+end
+
+--- Вычисляет каскадную позицию для обычных окон
+function NS.BaseWindow:CalculateCascadePosition(windowName, windowWidth, windowHeight)
+  local pos = self.positioning
+  local screenWidth = GetScreenWidth()
+  local screenHeight = GetScreenHeight()
+  
+  -- Стартовая позиция (правее MainWindow)
+  local mainX = screenWidth * pos.mainWindow.leftPercent / 100
+  local mainY = screenHeight * pos.mainWindow.topPercent / 100
+  local startX = mainX + 550 + pos.cascade.offsetX -- 550 - примерная ширина MainWindow
+  
+  -- Определяем порядковый номер окна в каскаде
+  local windowIndex = 0
+  for i, name in ipairs(pos.windowOrder) do
+    if name == windowName then
+      windowIndex = i - 1  -- уже существует
+      break
+    end
+  end
+  
+  -- Если окно новое, добавляем в порядок
+  if windowIndex == 0 then
+    table.insert(pos.windowOrder, windowName)
+    windowIndex = #pos.windowOrder - 1
+  end
+  
+  -- Вычисляем позицию с учетом каскада
+  local currentX = startX + windowIndex * pos.cascade.offsetX
+  local currentY = mainY
+  
+  -- Проверяем, не выходим ли за границы экрана
+  local maxUsableWidth = screenWidth * pos.cascade.maxWidth / 100
+  if currentX + windowWidth > maxUsableWidth then
+    -- Переносим на следующую строку
+    local row = math.floor((currentX - startX) / (maxUsableWidth - startX)) + 1
+    currentX = startX + ((windowIndex * pos.cascade.offsetX) % (maxUsableWidth - startX))
+    currentY = mainY + row * (windowHeight + pos.cascade.offsetY)
+  end
+  
+  return "TOPLEFT", UIParent, "TOPLEFT", currentX, -currentY
+end
 
 --- Creates a new BaseWindow object.
 function NS.BaseWindow:New(name, opts)
@@ -102,10 +194,21 @@ end
 
 --- Creates the main window frame and sets its properties.
 function NS.BaseWindow.prototype:CreateFrame()
-  local cfg = NS.Config:GetUIConfig("speakerWindow") or {}
-  self.frame = CreateFrame("Frame", self.name.."Frame", UIParent, "BackdropTemplate")
-  self.frame:SetSize(cfg.width or 550, cfg.height or 500)
-  self.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+  -- Создаем фрейм только если он еще не существует
+  if not self.frame then
+    local cfg = NS.Config:GetUIConfig("speakerWindow") or {}
+    local width = cfg.width or 550
+    local height = cfg.height or 500
+    
+    self.frame = CreateFrame("Frame", self.name.."Frame", UIParent, "BackdropTemplate")
+    self.frame:SetSize(width, height)
+    
+    -- Используем централизованную систему позиционирования
+    local point, relativeTo, relativePoint, x, y = NS.BaseWindow:CalculateStartPosition(
+      self.name, width, height
+    )
+    self.frame:SetPoint(point, relativeTo, relativePoint, x, y)
+  end
   self.frame:SetMovable(true); self.frame:EnableMouse(true)
   self.frame:RegisterForDrag("LeftButton")
   self.frame:SetScript("OnDragStart", self.frame.StartMoving)

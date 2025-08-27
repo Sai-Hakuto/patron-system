@@ -812,7 +812,19 @@ local function Initialize()
         PatronSystemNS.FollowerWindow:Initialize()
     end
     
-    if PatronSystemNS.QuickBlessingWindow then
+    -- Инициализируем все остальные окна для сохранения позиций
+    if PatronSystemNS.BlessingWindow and PatronSystemNS.BlessingWindow.Initialize then
+        PatronSystemNS.BlessingWindow:Initialize()
+    end
+    
+    if PatronSystemNS.MainWindow and PatronSystemNS.MainWindow.Initialize then
+        PatronSystemNS.MainWindow:Initialize()
+    end
+    
+    if PatronSystemNS.QuickBlessingWindow and PatronSystemNS.QuickBlessingWindow.Initialize then
+        PatronSystemNS.QuickBlessingWindow:Initialize()
+        PatronSystemNS.Logger:Info("QuickBlessingWindow инициализирован")
+    else
         PatronSystemNS.Logger:Info("QuickBlessingWindow готов к использованию")
     end
 

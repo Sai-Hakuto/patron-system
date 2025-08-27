@@ -262,7 +262,7 @@ function NS.MainWindow:OnSectionSelected(sectionId, action)
         
     elseif action == "OPEN_BLESSINGS" then
         NS.Logger:UI("Открытие окна благословений")
-        NS.UIManager:ShowBlessingWindow()
+        NS.UIManager:ShowBlessingWindowSmart()
         
     elseif action == "OPEN_SHOP" then
         NS.Logger:UI("Открытие окна магазина")

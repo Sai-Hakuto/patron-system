@@ -46,9 +46,13 @@ function NS.QuickBlessingWindow:CreateFrame()
     -- Вызываем базовый метод для создания стандартного фрейма
     BW.prototype.CreateFrame(self)
     
-    -- Настраиваем размер и позицию для быстрой панели
-    self.frame:SetSize(260, 120)  -- Начальный размер, будет динамически изменяться
-    self.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    -- Настраиваем размер для быстрой панели (только если фрейм только что создан)
+    if self.frame then
+        self.frame:SetSize(260, 120)  -- Начальный размер, будет динамически изменяться
+        
+        -- Если это первый раз, то позиция уже установлена BaseWindow
+        -- При динамическом изменении размера позиция не меняется
+    end
     
     -- Убираем стандартный фон BaseWindow и ставим наш
     self.frame:SetBackdrop(nil)
