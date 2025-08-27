@@ -1210,13 +1210,39 @@ local function HandleRequestCooldowns(player)
     end
     
     local playerId = player:GetGUIDLow()
-    local cooldowns = PatronGameLogicCore.playerCooldowns[playerId] or {}
+    local playerIdString = tostring(playerId)
+    
+    -- ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ для отладки
+    PatronLogger:Debug("MainAIO", "HandleRequestCooldowns", "Debug info", {
+        player = player:GetName(),
+        playerId = playerId,
+        playerIdString = playerIdString,
+        cooldowns_table_exists = PatronGameLogicCore.playerCooldowns ~= nil,
+        player_entry_exists = PatronGameLogicCore.playerCooldowns and PatronGameLogicCore.playerCooldowns[playerIdString] ~= nil
+    })
+    
+    local cooldowns = PatronGameLogicCore.playerCooldowns[playerIdString] or {}
     local currentTime = os.time()
     local cooldownData = {}
     
     -- Собираем актуальные кулдауны
-    for blessingId, expireTime in pairs(cooldowns) do
-        local remaining = expireTime - currentTime
+    local rawCooldownCount = 0
+    for blessingId, _ in pairs(cooldowns) do
+        rawCooldownCount = rawCooldownCount + 1
+    end
+    
+    PatronLogger:Debug("MainAIO", "HandleRequestCooldowns", "Raw cooldowns found", {
+        raw_cooldown_count = rawCooldownCount
+    })
+    
+    for blessingId, _ in pairs(cooldowns) do
+        local remaining = PatronGameLogicCore.GetBlessingCooldown(player, blessingId)
+        
+        PatronLogger:Debug("MainAIO", "HandleRequestCooldowns", "Checking blessing cooldown", {
+            blessing_id = blessingId,
+            remaining = remaining
+        })
+        
         if remaining > 0 then
             local blessingInfo = PatronGameLogicCore.ServerBlessingsConfig[blessingId]
             local duration = blessingInfo and blessingInfo.cooldown_seconds or 60
@@ -1228,11 +1254,17 @@ local function HandleRequestCooldowns(player)
         end
     end
     
+    -- Подсчитываем количество кулдаунов
+    local cooldownCount = 0
+    for _ in pairs(cooldownData) do
+        cooldownCount = cooldownCount + 1
+    end
+    
     -- Отправляем данные клиенту
     SafeSendResponse(player, "UpdateCooldowns", cooldownData)
     PatronLogger:Info("MainAIO", "HandleRequestCooldowns", "Cooldowns sent", {
         player = player:GetName(),
-        cooldown_count = table.getn(cooldownData)
+        cooldown_count = cooldownCount
     })
 end
 

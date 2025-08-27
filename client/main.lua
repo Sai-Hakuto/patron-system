@@ -294,7 +294,13 @@ local function RegisterAIOHandlers()
 		
 		-- НОВОЕ: Обновление кулдаунов благословений
 		UpdateCooldowns = function(_, cooldownData)
-			PatronSystemNS.Logger:AIO("Получены данные кулдаунов, количество: " .. table.getn(cooldownData))
+			-- Подсчитываем количество кулдаунов
+			local cooldownCount = 0
+			for _ in pairs(cooldownData or {}) do
+				cooldownCount = cooldownCount + 1
+			end
+			
+			PatronSystemNS.Logger:AIO("Получены данные кулдаунов, количество: " .. cooldownCount)
 			
 			-- Обновляем кулдауны в QuickBlessingWindow
 			if PatronSystemNS.QuickBlessingWindow and PatronSystemNS.QuickBlessingWindow.UpdateCooldowns then

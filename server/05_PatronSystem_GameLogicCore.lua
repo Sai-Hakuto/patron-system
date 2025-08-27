@@ -637,8 +637,15 @@ function PatronGameLogicCore.SetBlessingCooldown(player, blessingId)
     
     PatronLogger:Debug("GameLogicCore", "SetBlessingCooldown", "Cooldown set", {
         player = player:GetName(),
+        playerGUID = playerGUID,
         blessing_id = blessingId,
         timestamp = PatronGameLogicCore.playerCooldowns[playerGUID][blessingId]
+    })
+    
+    -- ОТЛАДОЧНЫЙ ВЫВОД всех кулдаунов игрока
+    PatronLogger:Debug("GameLogicCore", "SetBlessingCooldown", "All player cooldowns", {
+        playerGUID = playerGUID,
+        all_cooldowns = PatronGameLogicCore.playerCooldowns[playerGUID]
     })
 end
 
