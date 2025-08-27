@@ -812,8 +812,8 @@ local function Initialize()
         PatronSystemNS.FollowerWindow:Initialize()
     end
     
-    if PatronSystemNS.QuickBlessingWindow.Initialize then
-        PatronSystemNS.QuickBlessingWindow:Initialize()
+    if PatronSystemNS.QuickBlessingWindow then
+        PatronSystemNS.Logger:Info("QuickBlessingWindow готов к использованию")
     end
 
     

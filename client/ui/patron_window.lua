@@ -13,6 +13,9 @@ NS.PatronWindow = BW:New("PatronWindow", {
     onInit = function(self)
       -- Заголовок
       self.elements.title:SetText("Система Покровителей")
+      
+      -- Создаем кнопку-замок для блокировки перетаскивания
+      self:CreateLockButton()
 
       -- Горизонтальный селектор покровителей
       local patrons = NS.Config:GetSpeakersByType(NS.Config.SpeakerType.PATRON) or {}

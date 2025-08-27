@@ -52,6 +52,9 @@ NS.BlessingWindow = BW:New("BlessingWindow", {
   hooks = {
     onInit = function(self)
       if self.elements and self.elements.title then self.elements.title:SetText("Благословения") end
+      
+      -- Создаем кнопку-замок для блокировки перетаскивания
+      self:CreateLockButton()
 
       local tabs = {
         { id = "Defensive", title = "Defensive" },
@@ -133,6 +136,16 @@ function NS.BlessingWindow:UpdateLocalBlessingState(blessingId, isInPanel, panel
     if panelSlot then
       data.blessings[tostring(blessingId)].panelSlot = panelSlot
     end
+  end
+  
+  -- Обновляем QuickBlessingWindow если оно открыто
+  if NS.QuickBlessingWindow and NS.QuickBlessingWindow.RefreshData and NS.QuickBlessingWindow:IsShown() then
+    NS.QuickBlessingWindow:RefreshData()
+  end
+  
+  -- Обновляем состояние кнопок панели управления
+  if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.UpdateAvailability then
+    PatronSystemNS.ControlPanel.UpdateAvailability()
   end
 end
 
@@ -322,6 +335,16 @@ function NS.BlessingWindow:LoadPanelState()
   -- Размещаем блессинги в правильных позициях
   for slot, blessing in pairs(panelBlessings) do
     self:AddBlessingToSlotSilent(blessing, slot)
+  end
+  
+  -- Обновляем QuickBlessingWindow если оно открыто
+  if NS.QuickBlessingWindow and NS.QuickBlessingWindow.RefreshData and NS.QuickBlessingWindow:IsShown() then
+    NS.QuickBlessingWindow:RefreshData()
+  end
+  
+  -- Обновляем состояние кнопок панели управления
+  if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.UpdateAvailability then
+    PatronSystemNS.ControlPanel.UpdateAvailability()
   end
 end
 

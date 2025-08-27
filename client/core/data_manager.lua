@@ -338,6 +338,11 @@ function PatronSystemNS.DataManager:UpdatePlayerProgressCache(progressData)
     end
     
     PatronSystemNS.Logger:Data("Кэш прогресса игрока обновлен")
+    
+    -- Обновляем состояние кнопок панели управления при изменении прогресса
+    if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.UpdateAvailability then
+        PatronSystemNS.ControlPanel.UpdateAvailability()
+    end
 end
 
 -- Получить прогресс игрока из кэша

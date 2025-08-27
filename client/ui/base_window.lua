@@ -45,6 +45,7 @@ function NS.BaseWindow:New(name, opts)
   o.elements    = {}
   o.initialized = false
   o.currentData = nil        -- любые данные (speaker, follower, patron и т.п.)
+  o.isLocked    = false      -- состояние блокировки перетаскивания
   o.state = {
     inDialogue = false,
     replyButtons = {},
@@ -898,4 +899,120 @@ function NS.BaseWindow.prototype:CreateSelectorBar(parent, items, opts)
   end, height=(opts and opts.height) or 24, spacing=(opts and opts.spacing) or 6 })
   -- Возвращаем полный объект с методом setActive для совместимости
   return t.frame, t.buttons, t.setActive
+end
+
+-- ------------------------------ БЛОКИРОВКА ПЕРЕТАСКИВАНИЯ -----------------------------
+
+--- Создает кнопку-замок для блокировки перетаскивания окна.
+--- По умолчанию размещается в правом верхнем углу слева от кнопки закрытия.
+--- Пример использования: self:CreateLockButton() -- с настройками по умолчанию
+--- opts: { size=16, position={point, x, y}, textures={unlocked, locked} }
+function NS.BaseWindow.prototype:CreateLockButton(opts)
+  opts = opts or {}
+  local size = opts.size or 16
+  -- По умолчанию размещаем замок слева от крестика закрытия (крестик обычно 16x16)
+  local pos = opts.position or {"TOPRIGHT", -28, -8}  -- -28 чтобы быть слева от крестика
+  local textures = opts.textures or {
+    unlocked = "Interface\\Buttons\\LockButton-Unlocked-Up",
+    locked = "Interface\\Buttons\\LockButton-Locked-Up"
+  }
+  
+  local lockButton = CreateFrame("Button", (self.name or "Window") .. "_LockButton", self.frame)
+  lockButton:SetSize(size, size)
+  lockButton:SetPoint(pos[1], self.frame, pos[1], pos[2] or 0, pos[3] or 0)
+  
+  lockButton:SetNormalTexture(textures.unlocked)
+  lockButton:SetPushedTexture(textures.unlocked)
+  lockButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  
+  -- Тултип
+  lockButton:SetScript("OnEnter", function(btn)
+    GameTooltip:SetOwner(btn, "ANCHOR_LEFT")
+    GameTooltip:SetText((self.isLocked and "Разблокировать перетаскивание") or "Заблокировать перетаскивание")
+    GameTooltip:Show()
+  end)
+  lockButton:SetScript("OnLeave", GameTooltip_Hide)
+  
+  -- Обработчик клика
+  lockButton:SetScript("OnClick", function()
+    if self.ToggleDragLock then
+      self:ToggleDragLock()
+    else
+      -- Простая реализация для окон, не наследующих BaseWindow
+      self.isLocked = not self.isLocked
+      if self.frame then
+        if self.isLocked then
+          self.frame:SetMovable(false)
+        else
+          self.frame:SetMovable(true)
+        end
+      end
+      -- Обновляем текстуру замка
+      if self.isLocked then
+        lockButton:SetNormalTexture(textures.locked)
+        lockButton:SetPushedTexture(textures.locked)
+      else
+        lockButton:SetNormalTexture(textures.unlocked)
+        lockButton:SetPushedTexture(textures.unlocked)
+      end
+    end
+  end)
+  
+  self.elements.lockButton = lockButton
+  self.lockButtonTextures = textures
+  
+  -- Устанавливаем начальное состояние
+  if self.UpdateLockButton then
+    self:UpdateLockButton()
+  end
+  
+  return lockButton
+end
+
+--- Переключает блокировку перетаскивания окна.
+function NS.BaseWindow.prototype:ToggleDragLock()
+  self.isLocked = not self.isLocked
+  
+  if self.isLocked then
+    -- Блокируем только перетаскивание, но оставляем мышь активной для других элементов
+    self.frame:SetMovable(false)
+    self.frame:RegisterForDrag()  -- убираем drag события
+    if NS.Logger then
+      NS.Logger:UI(self.name .. ": перетаскивание заблокировано")
+    end
+  else
+    -- Разблокируем перетаскивание
+    self.frame:SetMovable(true)
+    self.frame:RegisterForDrag("LeftButton")  -- восстанавливаем drag события
+    if NS.Logger then
+      NS.Logger:UI(self.name .. ": перетаскивание разблокировано")
+    end
+  end
+  
+  self:UpdateLockButton()
+  
+  -- Вызываем хук если есть
+  if self.hooks.onLockToggle then
+    pcall(self.hooks.onLockToggle, self, self.isLocked)
+  end
+end
+
+--- Обновляет внешний вид кнопки-замка в зависимости от состояния блокировки.
+function NS.BaseWindow.prototype:UpdateLockButton()
+  if not (self.elements.lockButton and self.lockButtonTextures) then return end
+  
+  local texture = self.isLocked and self.lockButtonTextures.locked or self.lockButtonTextures.unlocked
+  self.elements.lockButton:SetNormalTexture(texture)
+  self.elements.lockButton:SetPushedTexture(texture)
+end
+
+--- Устанавливает состояние блокировки программно.
+function NS.BaseWindow.prototype:SetDragLocked(locked)
+  if self.isLocked == locked then return end
+  self:ToggleDragLock()
+end
+
+--- Возвращает текущее состояние блокировки.
+function NS.BaseWindow.prototype:IsDragLocked()
+  return self.isLocked
 end

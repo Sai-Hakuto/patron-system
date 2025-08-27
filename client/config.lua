@@ -114,4 +114,5 @@ function NS.Config:GetActionsByType(speakerType)
     else return {} end
 end
 
-NS.Logger:Info("Config загружен")
+-- Config загружен (логирование доступно после инициализации Logger)
+print("|cff00ff00[PatronSystem]|r Config загружен")

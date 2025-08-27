@@ -40,6 +40,9 @@ NS.FollowerWindow = BW:New("FollowerWindow", {
     onInit = function(self)
       -- Заголовок
       self.elements.title:SetText("Система Последователей")
+      
+      -- Создаем кнопку-замок для блокировки перетаскивания
+      self:CreateLockButton()
 
       -- ===== СЕЛЕКТОР (табы) ТОЛЬКО ПО ОТКРЫТЫМ ФОЛЛОВЕРАМ =====
       local items = {}
