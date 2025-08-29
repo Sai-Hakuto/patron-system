@@ -1695,8 +1695,10 @@ HandlePurchaseRequestCore = function(player, data)
         suffering = currentProgress.suffering
     })
 
-    -- Если изменилась структура данных - отправляем полный снапшот с текущим прогрессом
-    if data.purchaseType == "blessing" or data.purchaseType == "patron_upgrade" then
+    -- Если изменилась структура данных - отправляем полный снэпшот, используя
+    -- текущие данные в памяти вместо повторной загрузки из БД
+    if (data.purchaseType == "blessing" or data.purchaseType == "patron_upgrade")
+       and purchaseResult and purchaseResult.success then
         local snapshot = BuildProgressSnapshot(playerGuid, currentProgress)
         AIO.Handle(player, "PatronSystem", "DataUpdated", snapshot)
     end
