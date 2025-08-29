@@ -429,11 +429,11 @@ end
 function PatronDBManager.UpdateResourcesConditional(playerGuid, spendSouls, spendSuffering)
     spendSouls = spendSouls or 0
     spendSuffering = spendSuffering or 0
-    
-    -- Сначала проверяем текущие ресурсы игрока
-    local checkSql = string.format("SELECT souls, suffering FROM %s WHERE character_guid = '%s'", 
+
+    -- Сначала получаем текущие ресурсы игрока
+    local checkSql = string.format("SELECT souls, suffering FROM %s WHERE character_guid = '%s'",
         DB_CONFIG.TABLE_NAME, tostring(playerGuid))
-    
+
     local checkResult = PatronDBManager.SafeQuery(checkSql, "UpdateResourcesConditional_Check")
     if not checkResult then
         PatronLogger:Warning("DBManager", "UpdateResourcesConditional", "Player not found", {
@@ -441,58 +441,63 @@ function PatronDBManager.UpdateResourcesConditional(playerGuid, spendSouls, spen
         })
         return false
     end
-    
-    local currentSouls = PatronDBManager.SafeGetUInt32(checkResult, 0, 0, "souls")
-    local currentSuffering = PatronDBManager.SafeGetUInt32(checkResult, 1, 0, "suffering")
-    
-    -- Проверяем, достаточно ли ресурсов
-    if currentSouls < spendSouls or currentSuffering < spendSuffering then
-        PatronLogger:Warning("DBManager", "UpdateResourcesConditional", "Insufficient resources", {
-            player_guid = playerGuid,
-            current_souls = currentSouls,
-            current_suffering = currentSuffering,
-            souls_requested = spendSouls,
-            suffering_requested = spendSuffering
-        })
-        return false
-    end
-    
-    -- Списываем ресурсы
+
+    local oldSouls = PatronDBManager.SafeGetUInt32(checkResult, 0, 0, "souls")
+    local oldSuffering = PatronDBManager.SafeGetUInt32(checkResult, 1, 0, "suffering")
+
+    -- Атомарно списываем ресурсы при условии достаточного количества
     local updateSql = string.format([[
-        UPDATE %s SET 
-            souls = souls - %d, 
-            suffering = suffering - %d, 
-            updated_at = CURRENT_TIMESTAMP 
-        WHERE character_guid = '%s'
-    ]], DB_CONFIG.TABLE_NAME, spendSouls, spendSuffering, tostring(playerGuid))
-    
+        UPDATE %s SET
+            souls = souls - %d,
+            suffering = suffering - %d,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE character_guid = '%s' AND souls >= %d AND suffering >= %d
+    ]], DB_CONFIG.TABLE_NAME, spendSouls, spendSuffering, tostring(playerGuid), spendSouls, spendSuffering)
+
     local success = PatronDBManager.SafeExecute(updateSql, "UpdateResourcesConditional_Update")
-    
-    if success then
-        -- Успех: синхронизируем кэш
-        local cachedData = PatronDBManager.GetCachedPlayerData(playerGuid)
-        if cachedData then
-            cachedData.souls = (cachedData.souls or 0) - spendSouls
-            cachedData.suffering = (cachedData.suffering or 0) - spendSuffering
-            PatronDBManager.CachePlayerData(playerGuid, cachedData)
-        end
-        
-        PatronLogger:Info("DBManager", "UpdateResourcesConditional", "Resources spent successfully", {
-            player_guid = playerGuid,
-            souls_spent = spendSouls,
-            suffering_spent = spendSuffering,
-            souls_remaining = currentSouls - spendSouls,
-            suffering_remaining = currentSuffering - spendSuffering
-        })
-        return true
-    else
+    if not success then
         PatronLogger:Error("DBManager", "UpdateResourcesConditional", "Update failed", {
             player_guid = playerGuid
         })
         return false
     end
-end
 
+    local rowCountResult = PatronDBManager.SafeQuery("SELECT ROW_COUNT()", "UpdateResourcesConditional_RowCount")
+    local affectedRows = 0
+    if rowCountResult then
+        affectedRows = PatronDBManager.SafeGetUInt32(rowCountResult, 0, 0, "row_count")
+    end
+
+    if affectedRows == 0 then
+        PatronLogger:Warning("DBManager", "UpdateResourcesConditional", "Insufficient resources or update conflict", {
+            player_guid = playerGuid,
+            souls_before = oldSouls,
+            suffering_before = oldSuffering,
+            souls_requested = spendSouls,
+            suffering_requested = spendSuffering
+        })
+        return false
+    end
+
+    -- Успех: синхронизируем кэш
+    local cachedData = PatronDBManager.GetCachedPlayerData(playerGuid)
+    if cachedData then
+        cachedData.souls = (cachedData.souls or oldSouls) - spendSouls
+        cachedData.suffering = (cachedData.suffering or oldSuffering) - spendSuffering
+        PatronDBManager.CachePlayerData(playerGuid, cachedData)
+    end
+
+    PatronLogger:Info("DBManager", "UpdateResourcesConditional", "Resources spent successfully", {
+        player_guid = playerGuid,
+        souls_spent = spendSouls,
+        suffering_spent = spendSuffering,
+        souls_before = oldSouls,
+        suffering_before = oldSuffering,
+        souls_after = oldSouls - spendSouls,
+        suffering_after = oldSuffering - spendSuffering
+    })
+    return true
+end
 --[[==========================================================================
   АТОМАРНЫЕ ОПЕРАЦИИ ДЛЯ ОБНОВЛЕНИЯ КОНКРЕТНЫХ ПОЛЕЙ
 ============================================================================]]
