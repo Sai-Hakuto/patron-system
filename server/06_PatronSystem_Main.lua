@@ -1688,18 +1688,16 @@ HandlePurchaseRequestCore = function(player, data)
         return
     end
     
-    -- Получаем обновленные данные после изменения
-    local updatedProgress = PatronDBManager.LoadPlayerProgress(playerGuid)
-    
-    -- Отправляем мгновенное обновление ресурсов клиенту  
+    -- currentProgress уже обновлён в PatronDBManager.UpdateResourcesConditional через общий кэш
+    -- Отправляем мгновенное обновление ресурсов клиенту, используя данные из кэша
     AIO.Handle(player, "PatronSystem", "ResourcesUpdated", {
-        souls = updatedProgress.souls,
-        suffering = updatedProgress.suffering
+        souls = currentProgress.souls,
+        suffering = currentProgress.suffering
     })
-    
-    -- Если изменилась структура данных - отправляем полный снапшот
+
+    -- Если изменилась структура данных - отправляем полный снапшот с текущим прогрессом
     if data.purchaseType == "blessing" or data.purchaseType == "patron_upgrade" then
-        local snapshot = BuildProgressSnapshot(playerGuid, updatedProgress)
+        local snapshot = BuildProgressSnapshot(playerGuid, currentProgress)
         AIO.Handle(player, "PatronSystem", "DataUpdated", snapshot)
     end
     
