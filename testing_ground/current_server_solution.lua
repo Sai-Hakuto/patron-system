@@ -235,11 +235,6 @@ function DoBuff(caster, target, info)
     print("[BlessingUI] AddAura failed for spell "..tostring(sid))
     return
   end
-
-  -- Если нужен чисто визуал — введи info.visual_spell_id и кастуй его отдельно:
-  -- if info.visual_spell_id and info.visual_spell_id > 0 then
-  --   pcall(caster.CastSpell, caster, target, info.visual_spell_id, true)
-  -- end
 end
 
 

@@ -568,23 +568,53 @@ function PatronGameLogicCore.UnlockBlessing(player, blessingId, playerProgress)
         blessing_id = blessingId
     })
     
-    -- Простая реализация - добавляем в список благословений
+    -- Реализация разблокировки благословения за ресурсы
     if not playerProgress.blessings then
         playerProgress.blessings = {}
     end
     
-    playerProgress.blessings[tostring(blessingId)] = {
-        isDiscovered = false,
+    local blessingKey = tostring(blessingId)
+    
+    -- Проверяем не разблокировано ли уже
+    if playerProgress.blessings[blessingKey] then
+        return {
+            success = false,
+            message = "Благословение уже разблокировано",
+            action = {Type = "UNLOCK_BLESSING", BlessingID = blessingId}
+        }
+    end
+    
+    -- Добавляем благословение
+    playerProgress.blessings[blessingKey] = {
+        id = blessingId,
+        unlockedAt = os.time(),
+        usageCount = 0,
+        isDiscovered = true,
         isInPanel = false,
-        panelSlot = 0
+        panelSlot = 0  -- Слот на панели (0 = не размещено)
     }
     
-    return {
-        success = true,
-        message = "Blessing " .. blessingId .. " unlocked (PLACEHOLDER)",
-        action = {Type = "UNLOCK_BLESSING", BlessingID = blessingId},
-        requiresDataReload = true  -- Флаг для обновления кэша на клиенте
-    }
+    -- Сохраняем изменения в БД
+    local saveSuccess = PatronDBManager.SavePlayerProgress(tostring(player:GetGUID()), playerProgress)
+    
+    if saveSuccess then
+        player:SendBroadcastMessage("|cff00ff00[Покровители]|r Благословение " .. blessingId .. " разблокировано!")
+        
+        return {
+            success = true,
+            message = "Blessing " .. blessingId .. " unlocked successfully",
+            action = {Type = "UNLOCK_BLESSING", BlessingID = blessingId},
+            requiresDataReload = true
+        }
+    else
+        -- Откатываем изменения при ошибке сохранения
+        playerProgress.blessings[blessingKey] = nil
+        return {
+            success = false,
+            message = "Ошибка сохранения данных",
+            action = {Type = "UNLOCK_BLESSING", BlessingID = blessingId}
+        }
+    end
 end
 
 -- ПЛЕЙСХОЛДЕР: Удалить благословение
@@ -1132,19 +1162,36 @@ end
 
 -- ПЛЕЙСХОЛДЕР: Дать предмет игроку
 function PatronGameLogicCore.AddItem(player, itemId, amount)
-    PatronLogger:Info("GameLogicCore", "AddItem", "PLACEHOLDER: Adding item", {
+    PatronLogger:Info("GameLogicCore", "AddItem", "Adding item to player", {
         player = player:GetName(),
         item_id = itemId,
         amount = amount
     })
     
-    -- TODO: Реализовать добавление предметов через Player API
+    -- Используем Eluna Player API для добавления предмета
+    local success = pcall(function()
+        player:AddItem(itemId, amount)
+    end)
     
-    return {
-        success = true,
-        message = "Added " .. amount .. " of item " .. itemId .. " (PLACEHOLDER)",
-        action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount}
-    }
+    if success then
+        player:SendBroadcastMessage("|cff00ff00[Покровители]|r Получен предмет: " .. itemId .. " x" .. amount)
+        return {
+            success = true,
+            message = "Added " .. amount .. " of item " .. itemId,
+            action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount}
+        }
+    else
+        return {
+            success = false,
+            message = "Ошибка добавления предмета " .. itemId,
+            action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount}
+        }
+    end
+end
+
+-- Алиас для покупок (используется в HandlePurchaseRequestCore)
+function PatronGameLogicCore.GiveItem(player, itemId, amount)
+    return PatronGameLogicCore.AddItem(player, itemId, amount)
 end
 
 -- ПЛЕЙСХОЛДЕР: Забрать предмет у игрока
@@ -1311,6 +1358,81 @@ function PatronGameLogicCore.GetActionStatistics()
     }
 end
 
+-- Улучшение отношений с покровителем за ресурсы
+function PatronGameLogicCore.UpgradePatronRelationship(player, patronId, upgradeAmount, playerProgress)
+    PatronLogger:Info("GameLogicCore", "UpgradePatronRelationship", "Upgrading patron relationship", {
+        player = player:GetName(),
+        patron_id = patronId,
+        upgrade_amount = upgradeAmount
+    })
+    
+    local playerGuid = tostring(player:GetGUID())
+    upgradeAmount = upgradeAmount or 1
+    
+    -- Инициализируем покровителей если нет
+    if not playerProgress.patrons then
+        playerProgress.patrons = {}
+    end
+    
+    local patronKey = tostring(patronId)
+    
+    -- Инициализируем данные покровителя если нет
+    if not playerProgress.patrons[patronKey] then
+        playerProgress.patrons[patronKey] = {
+            patronId = patronId,
+            relationshipPoints = 0,
+            discoveredAt = os.time(),
+            currentDialogue = 0,
+            spokenLines = {},
+            interactionCount = 0
+        }
+    end
+    
+    local oldPoints = playerProgress.patrons[patronKey].relationshipPoints or 0
+    local newPoints = oldPoints + upgradeAmount
+    
+    playerProgress.patrons[patronKey].relationshipPoints = newPoints
+    playerProgress.patrons[patronKey].interactionCount = (playerProgress.patrons[patronKey].interactionCount or 0) + 1
+    
+    -- Сохраняем изменения в БД
+    local saveSuccess = PatronDBManager.SavePlayerProgress(playerGuid, playerProgress)
+    
+    if saveSuccess then
+        local oldRank = PatronGameLogicCore.GetPatronRank(oldPoints)
+        local newRank = PatronGameLogicCore.GetPatronRank(newPoints)
+        
+        local message = string.format("Отношения с покровителем %s улучшены (+%d очков, всего: %d)", 
+                                     patronId, upgradeAmount, newPoints)
+        
+        if newRank > oldRank then
+            message = message .. string.format(" | НОВЫЙ РАНГ: %d!", newRank)
+        end
+        
+        player:SendBroadcastMessage("|cff9482C9[Покровители]|r " .. message)
+        
+        return {
+            success = true,
+            message = "Patron relationship upgraded successfully",
+            action = {Type = "UPGRADE_PATRON", PatronID = patronId, UpgradeAmount = upgradeAmount},
+            oldPoints = oldPoints,
+            newPoints = newPoints,
+            oldRank = oldRank,
+            newRank = newRank,
+            requiresDataReload = true
+        }
+    else
+        -- Откатываем изменения при ошибке сохранения
+        playerProgress.patrons[patronKey].relationshipPoints = oldPoints
+        playerProgress.patrons[patronKey].interactionCount = (playerProgress.patrons[patronKey].interactionCount or 1) - 1
+        
+        return {
+            success = false,
+            message = "Ошибка сохранения данных",
+            action = {Type = "UPGRADE_PATRON", PatronID = patronId, UpgradeAmount = upgradeAmount}
+        }
+    end
+end
+
 -- ПЛЕЙСХОЛДЕР: Построить безопасные данные покровителя для клиента
 function PatronGameLogicCore.BuildSafePatronData(player, patronId, playerProgress)
     PatronLogger:Debug("GameLogicCore", "BuildSafePatronData", "PLACEHOLDER: Building patron data", {
@@ -1401,3 +1523,258 @@ PatronLogger:Info("GameLogicCore", "Initialize", "Supported action types", {
     effect_actions = {"APPLY_AURA", "REMOVE_AURA", "PLAY_SOUND"},
     item_actions = {"ADD_ITEM", "REMOVE_ITEM"}
 })
+
+--[[==========================================================================
+  SOULS-SUFFERINGS LOGIC - Система начисления ресурсов за убийства
+============================================================================]]
+
+-- Конфигурация начисления ресурсов
+local SOULS_SUFFERINGS_CONFIG = {
+    SOULS_PER_KILL = 1,              -- Души за убийство
+    SUFFERINGS_PER_KILL = 1,         -- Страдания за убийство  
+    NOTIFY_PLAYER = true,            -- Уведомлять игрока
+    LOG_KILLS = false,               -- ОПТИМИЗАЦИЯ: отключаем подробные логи
+    FLUSH_INTERVAL = 10,             -- Интервал флаша в БД (секунды)
+    FLUSH_THRESHOLD = 20             -- Порог ресурсов для принудительного флаша
+}
+
+-- Статистика убийств
+local killStats = {
+    total_kills = 0,
+    total_souls_awarded = 0,
+    total_sufferings_awarded = 0,
+    start_time = os.time()
+}
+
+-- Система отложенного сохранения ресурсов
+local resourceBatching = {
+    __pendingDeltas = {},           -- [playerGuid] = {souls = N, suffering = N}
+    __lastFlushAt = {},            -- [playerGuid] = timestamp
+    __playerCache = {}             -- [playerGuid] = playerProgress (кэш)
+}
+
+-- Функции для работы с кэшем и batch сохранениями
+function resourceBatching:GetOrLoadPlayerCache(playerGuid)
+    if not self.__playerCache[playerGuid] then
+        self.__playerCache[playerGuid] = PatronDBManager.LoadPlayerProgress(playerGuid)
+    end
+    return self.__playerCache[playerGuid]
+end
+
+function resourceBatching:UpdateResourcesInMemory(playerGuid, soulsGained, sufferingsGained)
+    local playerProgress = self:GetOrLoadPlayerCache(playerGuid)
+    if not playerProgress then return nil end
+    
+    -- Обновляем кэш
+    playerProgress.souls = (playerProgress.souls or 0) + soulsGained
+    playerProgress.suffering = (playerProgress.suffering or 0) + sufferingsGained
+    
+    -- Добавляем дельты для будущего флаша
+    if not self.__pendingDeltas[playerGuid] then
+        self.__pendingDeltas[playerGuid] = {souls = 0, suffering = 0}
+    end
+    self.__pendingDeltas[playerGuid].souls = self.__pendingDeltas[playerGuid].souls + soulsGained
+    self.__pendingDeltas[playerGuid].suffering = self.__pendingDeltas[playerGuid].suffering + sufferingsGained
+    
+    return playerProgress
+end
+
+function resourceBatching:ShouldFlushPlayer(playerGuid)
+    local deltas = self.__pendingDeltas[playerGuid]
+    if not deltas then return false end
+    
+    -- Проверка по времени
+    local lastFlush = self.__lastFlushAt[playerGuid] or 0
+    local timeSinceFlush = os.time() - lastFlush
+    
+    -- Проверка по порогу ресурсов
+    local totalPending = math.abs(deltas.souls) + math.abs(deltas.suffering)
+    
+    return timeSinceFlush >= SOULS_SUFFERINGS_CONFIG.FLUSH_INTERVAL or 
+           totalPending >= SOULS_SUFFERINGS_CONFIG.FLUSH_THRESHOLD
+end
+
+function resourceBatching:FlushPlayerResources(playerGuid)
+    local playerProgress = self.__playerCache[playerGuid]
+    local deltas = self.__pendingDeltas[playerGuid]
+    
+    if not playerProgress or not deltas then return false end
+    
+    -- ОПТИМИЗАЦИЯ: используем UpdateResources вместо SavePlayerProgress
+    local success = PatronDBManager.UpdateResources(playerGuid, playerProgress.souls, playerProgress.suffering)
+    
+    if success then
+        -- Очищаем дельты и обновляем время
+        self.__pendingDeltas[playerGuid] = {souls = 0, suffering = 0}
+        self.__lastFlushAt[playerGuid] = os.time()
+        
+        PatronLogger:Debug("GameLogicCore", "FlushPlayerResources", "Resources flushed to DB", {
+            player_guid = playerGuid,
+            souls = playerProgress.souls,
+            suffering = playerProgress.suffering
+        })
+        return true
+    end
+    
+    return false
+end
+
+-- События Eluna по документации: ON_KILL_CREATURE=7
+local EV_KILL_CREATURE = 7 -- (event, killer, killed)
+
+-- ОПТИМИЗИРОВАННЫЙ обработчик убийства мобов
+local function OnKillCreature(event, killer, killed)
+    -- Проверяем что killer - игрок и killed существует
+    if not killer or not killed then return end
+    
+    local playerGuid = tostring(killer:GetGUID())
+    local playerName = killer:GetName()
+    local mobName = killed:GetName() or "Unknown Creature"
+    
+    -- Начисляем ресурсы
+    local soulsGained = SOULS_SUFFERINGS_CONFIG.SOULS_PER_KILL
+    local sufferingsGained = SOULS_SUFFERINGS_CONFIG.SUFFERINGS_PER_KILL
+    
+    -- ОПТИМИЗАЦИЯ: Обновляем в памяти без обращения к БД
+    local playerProgress = resourceBatching:UpdateResourcesInMemory(playerGuid, soulsGained, sufferingsGained)
+    if not playerProgress then return end
+    
+    -- НОВОЕ: Мгновенно отправляем обновление ресурсов на клиент
+    if AIO and AIO.Handle then
+        AIO.Handle(killer, "PatronSystem", "ResourcesUpdated", {
+            souls = playerProgress.souls,
+            suffering = playerProgress.suffering
+        })
+    end
+    
+    -- Уведомляем игрока
+    if SOULS_SUFFERINGS_CONFIG.NOTIFY_PLAYER then
+        local message = string.format("+%d душ, +%d страданий (за %s)", 
+                                     soulsGained, sufferingsGained, mobName)
+        killer:SendBroadcastMessage("|cff9482C9[Покровители]|r " .. message)
+    end
+    
+    -- Обновляем статистику
+    killStats.total_kills = killStats.total_kills + 1
+    killStats.total_souls_awarded = killStats.total_souls_awarded + soulsGained
+    killStats.total_sufferings_awarded = killStats.total_sufferings_awarded + sufferingsGained
+    
+    -- Проверяем нужен ли флаш в БД
+    if resourceBatching:ShouldFlushPlayer(playerGuid) then
+        resourceBatching:FlushPlayerResources(playerGuid)
+    end
+    
+    -- Инвалидируем кэш SmallTalk при изменении ресурсов
+    if PatronSmallTalkCore then
+        PatronSmallTalkCore.InvalidatePlayerCache(playerGuid)
+    end
+end
+
+-- Получить статистику убийств
+function PatronGameLogicCore.GetKillStatistics()
+    local uptime = os.time() - killStats.start_time
+    return {
+        total_kills = killStats.total_kills,
+        total_souls_awarded = killStats.total_souls_awarded,
+        total_sufferings_awarded = killStats.total_sufferings_awarded,
+        uptime_seconds = uptime,
+        kills_per_minute = uptime > 0 and math.floor((killStats.total_kills / uptime) * 60) or 0
+    }
+end
+
+-- Система периодического флаша и cleanup
+function resourceBatching:PeriodicFlushAndCleanup()
+    local currentTime = os.time()
+    local playersToCleanup = {}
+    
+    -- Проходим по всем игрокам с pending данными
+    for playerGuid, deltas in pairs(self.__pendingDeltas) do
+        if deltas.souls ~= 0 or deltas.suffering ~= 0 then
+            -- Флашим если пришло время
+            if self:ShouldFlushPlayer(playerGuid) then
+                self:FlushPlayerResources(playerGuid)
+            end
+        end
+        
+        -- Помечаем для cleanup если игрок давно офлайн
+        local lastFlush = self.__lastFlushAt[playerGuid] or 0
+        if currentTime - lastFlush > 300 then -- 5 минут без активности
+            table.insert(playersToCleanup, playerGuid)
+        end
+    end
+    
+    -- Cleanup неактивных игроков из кэша
+    for _, playerGuid in ipairs(playersToCleanup) do
+        self.__playerCache[playerGuid] = nil
+        self.__pendingDeltas[playerGuid] = nil
+        self.__lastFlushAt[playerGuid] = nil
+    end
+    
+    if #playersToCleanup > 0 then
+        PatronLogger:Debug("GameLogicCore", "PeriodicFlushAndCleanup", "Cleaned up inactive players", {
+            count = #playersToCleanup
+        })
+    end
+end
+
+-- LOGOUT HOOK: Флашим ресурсы при выходе игрока
+local function OnPlayerLogout(event, player)
+    if not player then return end
+    
+    local playerGuid = tostring(player:GetGUID())
+    resourceBatching:FlushPlayerResources(playerGuid)
+    
+    -- Очищаем кэш игрока
+    resourceBatching.__playerCache[playerGuid] = nil
+end
+
+-- Регистрируем событие убийства мобов по числовому ID
+local registerSuccess = pcall(function()
+    RegisterPlayerEvent(EV_KILL_CREATURE, OnKillCreature)
+end)
+
+-- Регистрируем event logout (Event ID 4 - PLAYER_EVENT_ON_LOGOUT)
+local logoutRegisterSuccess = pcall(function()
+    RegisterPlayerEvent(4, OnPlayerLogout)
+end)
+
+-- Создаем простой таймер через рекурсивный вызов CreateLuaEvent
+local function CreatePeriodicTimer()
+    -- Запускаем периодический флаш каждые 15 секунд
+    CreateLuaEvent(function()
+        resourceBatching:PeriodicFlushAndCleanup()
+        CreatePeriodicTimer() -- Рекурсивный вызов для продолжения
+    end, 15000) -- 15 секунд
+end
+
+-- Запускаем таймер
+pcall(CreatePeriodicTimer)
+
+if registerSuccess then
+    PatronLogger:Info("GameLogicCore", "Initialize", "ON_KILL_CREATURE (7) registered successfully")
+    print("=== [PATRON SYSTEM] ON_KILL_CREATURE EVENT REGISTERED ===")
+else
+    PatronLogger:Error("GameLogicCore", "Initialize", "Failed to register ON_KILL_CREATURE (7)")
+    print("=== [PATRON SYSTEM] ERROR: ON_KILL_CREATURE REGISTRATION FAILED ===")
+end
+
+if logoutRegisterSuccess then
+    PatronLogger:Info("GameLogicCore", "Initialize", "PLAYER_LOGOUT (4) registered successfully")
+else
+    PatronLogger:Error("GameLogicCore", "Initialize", "Failed to register PLAYER_LOGOUT (4)")
+end
+
+PatronLogger:Info("GameLogicCore", "Initialize", "SOULS-SUFFERINGS Logic initialized", {
+    souls_per_kill = SOULS_SUFFERINGS_CONFIG.SOULS_PER_KILL,
+    sufferings_per_kill = SOULS_SUFFERINGS_CONFIG.SUFFERINGS_PER_KILL,
+    flush_interval = SOULS_SUFFERINGS_CONFIG.FLUSH_INTERVAL,
+    flush_threshold = SOULS_SUFFERINGS_CONFIG.FLUSH_THRESHOLD,
+    method = "ON_KILL_CREATURE (Event ID: 7) + Batched DB Updates",
+    event_registered = registerSuccess,
+    logout_registered = logoutRegisterSuccess
+})
+
+-- Экспортируем resourceBatching как глобальную переменную для доступа из других модулей
+PatronResourceBatching = resourceBatching
+
+PatronLogger:Info("GameLogicCore", "Initialize", "ResourceBatching exported as PatronResourceBatching")

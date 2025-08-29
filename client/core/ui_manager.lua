@@ -296,6 +296,9 @@ function PatronSystemNS.UIManager:ShowMainSelectionWindow()
     
     PatronSystemNS.Logger:UI("Показ главного окна выбора разделов")
     
+    -- Обновляем данные игрока (включая души и страдания) при каждом открытии
+    self:RequestPlayerInit()
+    
     PatronSystemNS.MainWindow:Show()
     self:RegisterWindow(PatronSystemNS.Config.WindowType.MAIN, PatronSystemNS.MainWindow)
 end

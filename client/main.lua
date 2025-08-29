@@ -320,6 +320,52 @@ local function RegisterAIOHandlers()
 			-- Триггерим событие для других систем
 			EventDispatcher:TriggerEvent("BlessingError", errorData)
 		end,
+		
+		-- ЛЕГКИЕ ОБНОВЛЕНИЯ РЕСУРСОВ (оптимизация производительности)
+		ResourcesUpdated = function(_, data)
+			PatronSystemNS.Logger:Debug("Получено обновление ресурсов: souls=" .. tostring(data.souls) .. ", suffering=" .. tostring(data.suffering))
+			
+			-- Обновляем кэш в DataManager
+			local progressCache = PatronSystemNS.DataManager.playerProgressCache
+			if progressCache then
+				progressCache.souls = data.souls
+				progressCache.suffering = data.suffering
+				
+				-- НЕ триггерим DataUpdated чтобы не сбрасывать кулдауны
+				-- Вместо этого триггерим специальное событие только для ресурсов
+				EventDispatcher:TriggerEvent("ResourcesOnlyUpdated", {souls = data.souls, suffering = data.suffering})
+				
+				-- Обновляем только главное окно (не затрагивая панель благословений)
+				if PatronSystemNS.MainWindow and PatronSystemNS.MainWindow:IsShown() then
+					PatronSystemNS.MainWindow:UpdatePlayerInfo()
+				end
+			end
+		end,
+		
+		-- ОБРАБОТЧИКИ ПОКУПОК ЗА РЕСУРСЫ
+		PurchaseError = function(_, data)
+			PatronSystemNS.Logger:AIO("Ошибка покупки: " .. tostring(data.errorType))
+			
+			-- Показываем сообщение пользователю
+			if data.message then
+				PatronSystemNS.UIManager:ShowMessage(data.message, "error")
+			end
+			
+			-- Триггерим событие для других систем
+			EventDispatcher:TriggerEvent("PurchaseError", data)
+		end,
+		
+		PurchaseSuccess = function(_, data)
+			PatronSystemNS.Logger:AIO("Покупка успешна: " .. tostring(data.itemId))
+			
+			-- Показываем сообщение об успехе
+			if data.message then
+				PatronSystemNS.UIManager:ShowMessage(data.message, "success")
+			end
+			
+			-- Триггерим событие для других систем
+			EventDispatcher:TriggerEvent("PurchaseSuccess", data)
+		end,
         
         -- ТЕСТОВЫЕ ОТВЕТЫ
         TestResponse = function(_, message)
@@ -409,6 +455,12 @@ local function RegisterModuleListeners()
             PatronSystemNS.QuickBlessingWindow:RefreshData()
             PatronSystemNS.Logger:Info("Быстрая панель благословений обновлена")
         end
+        
+        -- Обновляем главное окно с ресурсами
+        if PatronSystemNS.MainWindow and PatronSystemNS.MainWindow:IsShown() then
+            PatronSystemNS.MainWindow:UpdatePlayerInfo()
+            PatronSystemNS.Logger:Info("Главное окно обновлено (ресурсы)")
+        end
     end)
     
     -- Слушатель для инициализации игрока - обновляем панель
@@ -420,6 +472,12 @@ local function RegisterModuleListeners()
             if PatronSystemNS.ControlPanel and PatronSystemNS.ControlPanel.UpdateAvailability then
                 PatronSystemNS.ControlPanel.UpdateAvailability()
                 PatronSystemNS.Logger:Info("Панель управления обновлена после инициализации")
+            end
+            
+            -- Обновляем MainWindow если оно открыто
+            if PatronSystemNS.MainWindow and PatronSystemNS.MainWindow:IsShown() then
+                PatronSystemNS.MainWindow:UpdatePlayerInfo()
+                PatronSystemNS.Logger:Info("Главное окно обновлено после инициализации")
             end
         end)
     end)

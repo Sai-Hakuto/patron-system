@@ -131,6 +131,14 @@ local __lastCooldownsRequest = {}
 local __playerBlessingBusy = {}    -- [playerGUID] = true/false
 local __playerBlessingQueue = {}   -- [playerGUID] = {request1, request2, ...}
 
+-- Per-player purchase request mutex system (защита от дублирования покупок)
+local __playerPurchaseBusy = {}    -- [playerGUID] = true/false
+local __playerPurchaseQueue = {}   -- [playerGUID] = {request1, request2, ...}
+
+-- Idempotency system - TTL cache для обработанных requestId
+local __processedRequests = {}     -- [requestId] = {timestamp, result}
+local REQUEST_TTL_SECONDS = 300    -- 5 минут TTL для обработанных запросов
+
 --[[==========================================================================
   FORWARD DECLARATIONS
 ============================================================================]]
@@ -138,6 +146,7 @@ local __playerBlessingQueue = {}   -- [playerGUID] = {request1, request2, ...}
 -- Forward declarations для взаимно зависимых функций
 local HandlePlayerChoice
 local HandleRequestBlessingCore
+local HandlePurchaseRequestCore
 
 --[[==========================================================================
   PER-PLAYER BLESSING MUTEX SYSTEM
@@ -210,6 +219,152 @@ local function ProcessNextBlessingRequest(playerGUID)
     -- Очищаем очередь игрока если она пуста
     if #queue == 0 then
         __playerBlessingQueue[playerGUID] = nil
+    end
+end
+
+--[[==========================================================================
+  PER-PLAYER PURCHASE MUTEX SYSTEM
+============================================================================]]
+
+-- Проверить занятость игрока покупкой
+local function IsPlayerPurchaseBusy(playerGUID)
+    return __playerPurchaseBusy[playerGUID] == true
+end
+
+-- Поставить игрока в занятое состояние покупки
+local function SetPlayerPurchaseBusy(playerGUID, busy)
+    __playerPurchaseBusy[playerGUID] = busy
+    if not busy then
+        __playerPurchaseBusy[playerGUID] = nil -- очищаем чтобы не засорять память
+    end
+end
+
+-- Добавить запрос покупки в очередь игрока
+local function EnqueuePurchaseRequest(playerGUID, player, data)
+    if not __playerPurchaseQueue[playerGUID] then
+        __playerPurchaseQueue[playerGUID] = {}
+    end
+    
+    table.insert(__playerPurchaseQueue[playerGUID], {
+        player = player,
+        data = data,
+        timestamp = os.time()
+    })
+    
+    PatronLogger:Debug("MainAIO", "EnqueuePurchaseRequest", "Purchase request queued", {
+        playerGUID = playerGUID,
+        queue_length = #__playerPurchaseQueue[playerGUID]
+    })
+end
+
+-- Обработать следующий запрос покупки из очереди
+local function ProcessNextPurchaseRequest(playerGUID)
+    local queue = __playerPurchaseQueue[playerGUID]
+    if not queue or #queue == 0 then
+        return -- Очередь пуста
+    end
+    
+    local nextRequest = table.remove(queue, 1) -- Берем первый запрос из очереди
+    
+    PatronLogger:Debug("MainAIO", "ProcessNextPurchaseRequest", "Processing queued purchase", {
+        playerGUID = playerGUID,
+        remaining_in_queue = #queue
+    })
+    
+    -- Устанавливаем мьютекс для следующего запроса
+    SetPlayerPurchaseBusy(playerGUID, true)
+    
+    -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
+    local success, error = pcall(HandlePurchaseRequestCore, nextRequest.player, nextRequest.data)
+    
+    -- Освобождаем мьютекс
+    SetPlayerPurchaseBusy(playerGUID, false)
+    
+    if not success then
+        PatronLogger:Error("MainAIO", "ProcessNextPurchaseRequest", "Error processing queued purchase", {
+            playerGUID = playerGUID,
+            error = tostring(error)
+        })
+    end
+    
+    -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
+    ProcessNextPurchaseRequest(playerGUID)
+    
+    -- Очищаем очередь игрока если она пуста
+    if #queue == 0 then
+        __playerPurchaseQueue[playerGUID] = nil
+    end
+end
+
+--[[==========================================================================
+  IDEMPOTENCY SYSTEM - TTL CACHE ДЛЯ REQUESTID
+============================================================================]]
+
+-- Проверить, был ли requestId уже обработан
+local function IsRequestProcessed(requestId)
+    if not requestId then return false end
+    
+    local cached = __processedRequests[requestId]
+    if not cached then return false end
+    
+    -- Проверяем TTL
+    local currentTime = os.time()
+    if (currentTime - cached.timestamp) > REQUEST_TTL_SECONDS then
+        __processedRequests[requestId] = nil -- Очищаем устаревший кэш
+        return false
+    end
+    
+    return true
+end
+
+-- Сохранить результат обработки requestId
+local function CacheRequestResult(requestId, result)
+    if not requestId then return end
+    
+    __processedRequests[requestId] = {
+        timestamp = os.time(),
+        result = result
+    }
+    
+    PatronLogger:Debug("MainAIO", "CacheRequestResult", "Request result cached", {
+        request_id = requestId,
+        success = result and result.success or false
+    })
+end
+
+-- Получить закэшированный результат
+local function GetCachedRequestResult(requestId)
+    if not requestId then return nil end
+    
+    local cached = __processedRequests[requestId]
+    if not cached then return nil end
+    
+    -- Проверяем TTL
+    local currentTime = os.time()
+    if (currentTime - cached.timestamp) > REQUEST_TTL_SECONDS then
+        __processedRequests[requestId] = nil
+        return nil
+    end
+    
+    return cached.result
+end
+
+-- Очистка устаревших requestId (вызывается периодически)
+local function CleanupExpiredRequests()
+    local currentTime = os.time()
+    local cleanedCount = 0
+    
+    for requestId, cached in pairs(__processedRequests) do
+        if (currentTime - cached.timestamp) > REQUEST_TTL_SECONDS then
+            __processedRequests[requestId] = nil
+            cleanedCount = cleanedCount + 1
+        end
+    end
+    
+    if cleanedCount > 0 then
+        PatronLogger:Debug("MainAIO", "CleanupExpiredRequests", "Expired requests cleaned", {
+            cleaned_count = cleanedCount
+        })
     end
 end
 
@@ -1345,6 +1500,286 @@ HandleRequestBlessingCore = function(player, data)
     end
 end
 
+-- Ядро обработки запроса на покупку за ресурсы (без мьютекса) 
+HandlePurchaseRequestCore = function(player, data)
+    local playerGuid = tostring(player:GetGUID())
+    local playerName = player:GetName()
+    local requestId = data.requestId
+    
+    PatronLogger:Info("MainAIO", "HandlePurchaseRequest", "Processing purchase request", {
+        player = playerName,
+        item_id = data.itemId,
+        cost_souls = data.costSouls,
+        cost_suffering = data.costSuffering,
+        request_id = requestId
+    })
+    
+    -- IDEMPOTENCY CHECK: Проверяем, не обрабатывался ли уже этот requestId
+    if requestId and IsRequestProcessed(requestId) then
+        local cachedResult = GetCachedRequestResult(requestId)
+        PatronLogger:Info("MainAIO", "HandlePurchaseRequest", "Duplicate request detected - returning cached result", {
+            request_id = requestId,
+            player = playerName
+        })
+        
+        -- Отправляем закэшированный результат
+        if cachedResult then
+            if cachedResult.success then
+                AIO.Handle(player, "PatronSystem", "PurchaseSuccess", cachedResult.response)
+            else
+                AIO.Handle(player, "PatronSystem", "PurchaseError", cachedResult.response)
+            end
+        end
+        return
+    end
+    
+    -- Валидация входных данных
+    if not data.itemId or not data.costSouls or not data.costSuffering then
+        PatronLogger:Error("MainAIO", "HandlePurchaseRequest", "Invalid purchase data", {
+            item_id = data.itemId,
+            cost_souls = data.costSouls,
+            cost_suffering = data.costSuffering
+        })
+        
+        local errorResponse = {
+            message = "Некорректные данные покупки",
+            errorType = "invalid_data"
+        }
+        
+        AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
+        
+        -- Кэшируем результат ошибки
+        if requestId then
+            CacheRequestResult(requestId, {
+                success = false,
+                response = errorResponse
+            })
+        end
+        return
+    end
+    
+    local itemId = data.itemId
+    local costSouls = data.costSouls or 0
+    local costSuffering = data.costSuffering or 0
+    
+    -- Проверка что игрок имеет достаточно ресурсов (проверяем в кэше с учетом pending delta)
+    local currentProgress = PatronResourceBatching:GetOrLoadPlayerCache(playerGuid)
+    if not currentProgress then
+        PatronLogger:Error("MainAIO", "HandlePurchaseRequest", "Failed to load player progress", {
+            player = playerName
+        })
+        
+        local errorResponse = {
+            message = "Не удалось загрузить данные игрока",
+            errorType = "data_load_failed"
+        }
+        
+        AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
+        
+        -- Кэшируем результат ошибки
+        if requestId then
+            CacheRequestResult(requestId, {
+                success = false,
+                response = errorResponse
+            })
+        end
+        return
+    end
+    
+    local currentSouls = currentProgress.souls or 0
+    local currentSuffering = currentProgress.suffering or 0
+    
+    if currentSouls < costSouls or currentSuffering < costSuffering then
+        PatronLogger:Warning("MainAIO", "HandlePurchaseRequest", "Insufficient resources", {
+            player = playerName,
+            required_souls = costSouls,
+            required_suffering = costSuffering,
+            available_souls = currentSouls,
+            available_suffering = currentSuffering
+        })
+        
+        local errorResponse = {
+            message = string.format("Недостаточно ресурсов. Нужно: %d душ, %d страданий", costSouls, costSuffering),
+            errorType = "insufficient_resources"
+        }
+        
+        AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
+        
+        -- Кэшируем результат ошибки
+        if requestId then
+            CacheRequestResult(requestId, {
+                success = false,
+                response = errorResponse
+            })
+        end
+        return
+    end
+    
+    -- АТОМАРНОЕ СПИСАНИЕ в БД с условием
+    local paymentSuccess = PatronDBManager.UpdateResourcesConditional(playerGuid, costSouls, costSuffering)
+    
+    if not paymentSuccess then
+        PatronLogger:Warning("MainAIO", "HandlePurchaseRequest", "Payment failed - insufficient resources in DB", {
+            player = playerName,
+            cost_souls = costSouls,
+            cost_suffering = costSuffering
+        })
+        
+        local errorResponse = {
+            message = "Не хватает ресурсов для совершения покупки",
+            errorType = "payment_failed"
+        }
+        
+        AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
+        
+        -- Кэшируем результат ошибки
+        if requestId then
+            CacheRequestResult(requestId, {
+                success = false,
+                response = errorResponse
+            })
+        end
+        return
+    end
+    
+    -- ИСПРАВЛЕНИЕ: НЕ обнуляем pendingDeltas - оставляем накопленные киллы
+    -- Периодический флаш позже синхронизирует абсолютные значения через UpdateResources
+    -- Это предотвращает потерю накопленных +souls/+suffering от киллов при покупках
+    
+    -- Применяем эффект покупки в зависимости от типа предмета
+    local purchaseResult = nil
+    
+    if data.purchaseType == "blessing" then
+        -- Разблокировка благословения
+        purchaseResult = PatronGameLogicCore.UnlockBlessing(player, itemId, currentProgress)
+        
+    elseif data.purchaseType == "item" then
+        -- Выдача предмета
+        purchaseResult = PatronGameLogicCore.GiveItem(player, itemId, data.quantity or 1)
+        
+    elseif data.purchaseType == "patron_upgrade" then
+        -- Улучшение отношений с патроном
+        purchaseResult = PatronGameLogicCore.UpgradePatronRelationship(player, itemId, data.upgradeAmount or 1)
+        
+    else
+        PatronLogger:Error("MainAIO", "HandlePurchaseRequest", "Unknown purchase type", {
+            purchase_type = data.purchaseType
+        })
+        
+        -- Возвращаем ресурсы при неизвестном типе покупки
+        PatronDBManager.UpdateResources(playerGuid, 
+            (currentProgress.souls or 0) + costSouls, 
+            (currentProgress.suffering or 0) + costSuffering)
+        
+        local errorResponse = {
+            message = "Неизвестный тип покупки",
+            errorType = "unknown_purchase_type"
+        }
+        
+        AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
+        
+        -- Кэшируем результат ошибки
+        if requestId then
+            CacheRequestResult(requestId, {
+                success = false,
+                response = errorResponse
+            })
+        end
+        return
+    end
+    
+    -- Получаем обновленные данные после изменения
+    local updatedProgress = PatronDBManager.LoadPlayerProgress(playerGuid)
+    
+    -- Отправляем мгновенное обновление ресурсов клиенту  
+    AIO.Handle(player, "PatronSystem", "ResourcesUpdated", {
+        souls = updatedProgress.souls,
+        suffering = updatedProgress.suffering
+    })
+    
+    -- Если изменилась структура данных - отправляем полный снапшот
+    if data.purchaseType == "blessing" or data.purchaseType == "patron_upgrade" then
+        local snapshot = BuildProgressSnapshot(playerGuid, updatedProgress)
+        AIO.Handle(player, "PatronSystem", "DataUpdated", snapshot)
+    end
+    
+    -- Успешное завершение покупки
+    local successResponse = {
+        itemId = itemId,
+        purchaseType = data.purchaseType,
+        costSouls = costSouls,
+        costSuffering = costSuffering,
+        message = string.format("Покупка успешно завершена! Потрачено: %d душ, %d страданий", costSouls, costSuffering)
+    }
+    
+    AIO.Handle(player, "PatronSystem", "PurchaseSuccess", successResponse)
+    
+    -- Кэшируем результат успеха
+    if requestId then
+        CacheRequestResult(requestId, {
+            success = true,
+            response = successResponse
+        })
+    end
+    
+    PatronLogger:Info("MainAIO", "HandlePurchaseRequest", "Purchase completed successfully", {
+        player = playerName,
+        item_id = itemId,
+        purchase_type = data.purchaseType,
+        souls_spent = costSouls,
+        suffering_spent = costSuffering
+    })
+end
+
+-- Обработчик запроса покупки с мьютексом
+local function HandlePurchaseRequest(player, data)
+    local playerGUID = tostring(player:GetGUID())
+    
+    -- Проверяем занятость игрока покупкой
+    if IsPlayerPurchaseBusy(playerGUID) then
+        PatronLogger:Debug("MainAIO", "HandlePurchaseRequest", "Player busy with purchase, enqueueing", {
+            playerGUID = playerGUID
+        })
+        
+        -- Добавляем в очередь
+        EnqueuePurchaseRequest(playerGUID, player, data)
+        return
+    end
+    
+    -- Устанавливаем мьютекс
+    SetPlayerPurchaseBusy(playerGUID, true)
+    
+    PatronLogger:Debug("MainAIO", "HandlePurchaseRequest", "Processing purchase with mutex", {
+        playerGUID = playerGUID,
+        item_id = data.itemId
+    })
+    
+    -- Обрабатываем запрос
+    local success, error = pcall(HandlePurchaseRequestCore, player, data)
+    
+    -- Освобождаем мьютекс
+    SetPlayerPurchaseBusy(playerGUID, false)
+    
+    if not success then
+        PatronLogger:Error("MainAIO", "HandlePurchaseRequest", "Error in purchase processing", {
+            error = tostring(error),
+            player = player:GetName()
+        })
+        
+        local errorResponse = {
+            message = "Внутренняя ошибка при обработке покупки",
+            errorType = "internal_error"
+        }
+        
+        AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
+        
+        -- Не кэшируем внутренние ошибки, так как они могут быть временными
+    end
+    
+    -- Обрабатываем следующий запрос из очереди
+    ProcessNextPurchaseRequest(playerGUID)
+end
+
 --[[==========================================================================
   РЕГИСТРАЦИЯ AIO ОБРАБОТЧИКОВ
 ============================================================================]]
@@ -1476,6 +1911,9 @@ AIO.AddHandlers(ADDON_PREFIX, {
     RequestBlessing = CreateSafeHandler("RequestBlessing", HandleRequestBlessingWithMutex),
     RequestCooldowns = CreateSafeHandler("RequestCooldowns", HandleRequestCooldowns),
     
+    --=== ПОКУПКИ ЗА РЕСУРСЫ ===--
+    PurchaseRequest = CreateSafeHandler("PurchaseRequest", HandlePurchaseRequest),
+    
     --=== SMALLTALK ===--
     RefreshSmallTalk = CreateSafeHandler("RefreshSmallTalk", HandleRefreshSmallTalk),
     
@@ -1540,6 +1978,17 @@ function PatronAIOMain.ResetStats()
     }
     PatronLogger:Info("MainAIO", "ResetStats", "Statistics reset")
 end
+
+-- Периодическая очистка кэша requestId
+local function CreateRequestCleanupTimer()
+    CreateLuaEvent(function()
+        CleanupExpiredRequests()
+        CreateRequestCleanupTimer() -- Рекурсивный вызов
+    end, 60000) -- Каждую минуту
+end
+
+-- Запускаем очистку кэша
+pcall(CreateRequestCleanupTimer)
 
 --[[==========================================================================
   ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА

@@ -99,7 +99,7 @@ function NS.MainWindow:CreateLeftPanel()
     -- ЗАГЛУШКА: Ресурсы игрока
     self.elements.resources = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     self.elements.resources:SetPoint("TOP", self.elements.infoTitle, "BOTTOM", 0, -10)
-    self.elements.resources:SetText("Money: 1000g\nSouls: 50\nSuffering: 25")
+    self.elements.resources:SetText("Money: 0c\nSouls: 0\nSuffering: 0")
     self.elements.resources:SetJustifyH("LEFT")
     NS.Config:ApplyColorToText(self.elements.resources, "itemLegendary")
 end
@@ -234,9 +234,15 @@ function NS.MainWindow:UpdatePlayerInfo()
     -- Обновляем имя игрока
     self.elements.playerName:SetText(UnitName("player") or "Player")
     
-    -- ЗАГЛУШКА: Здесь должна быть логика получения ресурсов игрока
+    -- Получаем реальные данные ресурсов игрока
     if self.elements.resources then
-        self.elements.resources:SetText("Money: " .. GetMoney() .. "c\nSouls: [STUB]\nSuffering: [STUB]")
+        local progress = PatronSystemNS.DataManager:GetPlayerProgress()
+        local souls = (progress and progress.souls) or 0
+        local suffering = (progress and progress.suffering) or 0
+        
+        local resourceText = string.format("Money: %dc\nSouls: %d\nSuffering: %d", 
+                                          GetMoney(), souls, suffering)
+        self.elements.resources:SetText(resourceText)
     end
 end
 
