@@ -307,6 +307,19 @@ local function RegisterAIOHandlers()
 				PatronSystemNS.QuickBlessingWindow:UpdateCooldowns(cooldownData)
 			end
 		end,
+		
+		-- НОВОЕ: Обработчик ошибок благословений с подробной информацией
+		BlessingError = function(_, errorData)
+			PatronSystemNS.Logger:AIO("Ошибка благословения: " .. tostring(errorData.errorType))
+			
+			-- Показываем сообщение пользователю
+			if errorData.message then
+				PatronSystemNS.UIManager:ShowMessage(errorData.message, "error")
+			end
+			
+			-- Триггерим событие для других систем
+			EventDispatcher:TriggerEvent("BlessingError", errorData)
+		end,
         
         -- ТЕСТОВЫЕ ОТВЕТЫ
         TestResponse = function(_, message)

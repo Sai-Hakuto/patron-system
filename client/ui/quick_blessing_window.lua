@@ -222,9 +222,12 @@ function NS.QuickBlessingWindow:CreateBlessingButtons()
         end)
         button:SetScript("OnLeave", GameTooltip_Hide)
 
-        -- Обработчик клика (как в client_solution)
+        -- Обработчик клика с визуальной обратной связью
         button:SetScript("OnClick", function()
             NS.Logger:Info("QuickBlessingWindow: нажато благословение " .. blessing.name .. " (ID: " .. blessing.id .. ")")
+            
+            -- Всегда показываем визуальный эффект нажатия
+            self:PlayButtonPressEffect(button)
             
             -- Проверяем кулдаун перед отправкой запроса
             if button.cooldown and button.cooldown:GetCooldownDuration() > 0 then
@@ -255,11 +258,6 @@ function NS.QuickBlessingWindow:RequestBlessing(blessing)
             -- Можно добавить дополнительные модификаторы если нужно
         })
         NS.Logger:Info("QuickBlessingWindow: отправлен запрос благословения " .. blessing.id)
-        
-        -- После отправки запроса обновляем кулдауны через небольшую задержку
-        C_Timer.After(0.5, function()
-            self:RequestCooldownUpdate()
-        end)
     else
         NS.Logger:Error("QuickBlessingWindow: AIO.Handle недоступен!")
         if NS.UIManager then
@@ -373,6 +371,17 @@ function NS.QuickBlessingWindow:UpdateCooldowns(cooldownData)
 end
 
 function NS.QuickBlessingWindow:RequestCooldownUpdate()
+    -- Дебаунс: не чаще 1 раза в секунду
+    local currentTime = GetTime()
+    self._lastCooldownRequest = self._lastCooldownRequest or 0
+    
+    if (currentTime - self._lastCooldownRequest) < 1.0 then
+        NS.Logger:Debug("QuickBlessingWindow: запрос кулдаунов пропущен (дебаунс)")
+        return
+    end
+    
+    self._lastCooldownRequest = currentTime
+    
     -- Запрашиваем текущие кулдауны с сервера
     if AIO and AIO.Handle then
         AIO.Handle("PatronSystem", "RequestCooldowns", {})
@@ -393,6 +402,23 @@ function NS.QuickBlessingWindow:RefreshData()
         self:AdjustWindowSize()
         NS.Logger:Info("QuickBlessingWindow: данные обновлены")
     end
+end
+
+--[[==========================================================================
+  ВИЗУАЛЬНЫЕ ЭФФЕКТЫ
+============================================================================]]
+
+-- Эффект нажатия кнопки (только визуальный)
+function NS.QuickBlessingWindow:PlayButtonPressEffect(button)
+    if not button then return end
+    
+    -- Визуальный эффект нажатия
+    button:SetButtonState("PUSHED", true)
+    C_Timer.After(0.1, function()
+        if button and button:IsVisible() then
+            button:SetButtonState("NORMAL", false)
+        end
+    end)
 end
 
 print("|cff00ff00[PatronSystem]|r QuickBlessingWindow загружен")

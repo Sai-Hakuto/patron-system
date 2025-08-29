@@ -114,12 +114,104 @@ local aioStats = {
     requestTypes = {}
 }
 
+-- Safety configuration and guards (added to prevent runaway recursion and spam)
+local SAFETY = {
+    ENABLE_REENTRANCY_GUARD = true,
+    MAX_NESTED_CALLS = 128,
+    COOLDOWNS_MIN_INTERVAL = 0.25, -- seconds
+}
+
+-- Global guard to prevent unbounded nested handler invocations
+local __currentNestedDepth = 0
+
+-- Per-player rate limit state for noisy requests
+local __lastCooldownsRequest = {}
+
+-- Per-player blessing request mutex system
+local __playerBlessingBusy = {}    -- [playerGUID] = true/false
+local __playerBlessingQueue = {}   -- [playerGUID] = {request1, request2, ...}
+
 --[[==========================================================================
   FORWARD DECLARATIONS
 ============================================================================]]
 
 -- Forward declarations для взаимно зависимых функций
 local HandlePlayerChoice
+local HandleRequestBlessingCore
+
+--[[==========================================================================
+  PER-PLAYER BLESSING MUTEX SYSTEM
+============================================================================]]
+
+-- Проверить занятость игрока
+local function IsPlayerBlessingBusy(playerGUID)
+    return __playerBlessingBusy[playerGUID] == true
+end
+
+-- Поставить игрока в занятое состояние
+local function SetPlayerBlessingBusy(playerGUID, busy)
+    __playerBlessingBusy[playerGUID] = busy
+    if not busy then
+        __playerBlessingBusy[playerGUID] = nil -- очищаем чтобы не засорять память
+    end
+end
+
+-- Добавить запрос в очередь игрока
+local function EnqueueBlessingRequest(playerGUID, player, data)
+    if not __playerBlessingQueue[playerGUID] then
+        __playerBlessingQueue[playerGUID] = {}
+    end
+    
+    table.insert(__playerBlessingQueue[playerGUID], {
+        player = player,
+        data = data,
+        timestamp = os.time()
+    })
+    
+    PatronLogger:Debug("MainAIO", "EnqueueBlessingRequest", "Request queued", {
+        playerGUID = playerGUID,
+        queue_length = #__playerBlessingQueue[playerGUID]
+    })
+end
+
+-- Обработать следующий запрос из очереди игрока
+local function ProcessNextBlessingRequest(playerGUID)
+    local queue = __playerBlessingQueue[playerGUID]
+    if not queue or #queue == 0 then
+        return -- очереди нет или пуста
+    end
+    
+    local nextRequest = table.remove(queue, 1) -- FIFO - берем первый
+    
+    PatronLogger:Debug("MainAIO", "ProcessNextBlessingRequest", "Processing queued request", {
+        playerGUID = playerGUID,
+        remaining_in_queue = #queue
+    })
+    
+    -- Устанавливаем мьютекс для следующего запроса
+    SetPlayerBlessingBusy(playerGUID, true)
+    
+    -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
+    local success, error = pcall(HandleRequestBlessingCore, nextRequest.player, nextRequest.data)
+    
+    -- Освобождаем мьютекс
+    SetPlayerBlessingBusy(playerGUID, false)
+    
+    if not success then
+        PatronLogger:Error("MainAIO", "ProcessNextBlessingRequest", "Error processing queued request", {
+            playerGUID = playerGUID,
+            error = tostring(error)
+        })
+    end
+    
+    -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
+    ProcessNextBlessingRequest(playerGUID)
+    
+    -- Очищаем очередь игрока если она пуста
+    if #queue == 0 then
+        __playerBlessingQueue[playerGUID] = nil
+    end
+end
 
 --[[==========================================================================
   УТИЛИТАРНЫЕ ФУНКЦИИ
@@ -995,58 +1087,118 @@ end
   ОБРАБОТЧИКИ ИСПОЛЬЗОВАНИЯ БЛАГОСЛОВЕНИЙ
 ============================================================================]]
 
--- Обработка запроса на использование благословения (перенесено из 05_PatronSystem_GameLogicCore.lua)
-local function HandleRequestBlessing(player, data)
+-- Обработка запроса с мьютексом (точка входа)
+local function HandleRequestBlessingWithMutex(player, data)
+    local playerGUID = tostring(player:GetGUIDLow())
+    
+    -- Проверяем занятость игрока
+    if IsPlayerBlessingBusy(playerGUID) then
+        PatronLogger:Debug("MainAIO", "HandleRequestBlessingWithMutex", "Player busy, enqueueing request", {
+            player = player:GetName(),
+            playerGUID = playerGUID
+        })
+        
+        EnqueueBlessingRequest(playerGUID, player, data)
+        return -- запрос поставлен в очередь
+    end
+    
+    -- Устанавливаем мьютекс
+    SetPlayerBlessingBusy(playerGUID, true)
+    
+    PatronLogger:Debug("MainAIO", "HandleRequestBlessingWithMutex", "Processing request with mutex", {
+        player = player:GetName(),
+        blessing_id = data.blessingID
+    })
+    
+    -- Обрабатываем запрос
+    local success, error = pcall(HandleRequestBlessingCore, player, data)
+    
+    -- Освобождаем мьютекс
+    SetPlayerBlessingBusy(playerGUID, false)
+    
+    if not success then
+        PatronLogger:Error("MainAIO", "HandleRequestBlessingWithMutex", "Error in blessing processing", {
+            player = player:GetName(),
+            error = tostring(error)
+        })
+    end
+    
+    -- Обрабатываем следующий запрос из очереди (если есть)
+    ProcessNextBlessingRequest(playerGUID)
+end
+
+-- Отправить ошибку благословения с типом клиенту
+local function SendBlessingError(player, errorType, message)
+    -- Отправляем сообщение игроку
+    if message then
+        player:SendBroadcastMessage(message)
+    end
+    
+    -- Отправляем детальную информацию клиенту для звукового сопровождения
+    SafeSendResponse(player, "BlessingError", {
+        errorType = errorType,
+        message = message
+    })
+    
+    PatronLogger:Debug("MainAIO", "SendBlessingError", "Blessing error sent to client", {
+        player = player:GetName(),
+        errorType = errorType,
+        message = message
+    })
+end
+
+-- Ядро обработки запроса на использование благословения (без мьютекса)
+HandleRequestBlessingCore = function(player, data)
     PatronLogger:Info("MainAIO", "HandleRequestBlessing", "Processing blessing request", {
         player = player:GetName(),
         blessing_id = data.blessingID
     })
 
-    local success_pcall, result_pcall = pcall(function()
-        local playerName = tostring(player:GetName())
-        PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Request received", {
-            player = playerName,
-            blessing_id = data.blessingID
+    local playerName = tostring(player:GetName())
+    PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Request received", {
+        player = playerName,
+        blessing_id = data.blessingID
+    })
+
+    local blessingID = data.blessingID
+    local info = BlessingsData[blessingID]
+
+    if not info then
+        SendBlessingError(player, "unknown_blessing", "Неизвестное благословение.")
+        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Unknown blessing ID", {
+            blessing_id = blessingID
         })
+        return
+    end
+    
+    PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Blessing found", {
+        blessing_name = info.name,
+        spell_id = info.spell_id
+    })
 
-        local blessingID = data.blessingID
-        local info = BlessingsData[blessingID]
+    -- === ЛОГИКА ОБРАБОТКИ ЦЕЛИ ===
+    local finalSpellTarget = player -- По умолчанию цель - сам игрок
 
-        if not info then
-            player:SendBroadcastMessage("Неизвестное благословение.")
-            PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Unknown blessing ID", {
-                blessing_id = blessingID
-            })
+    if info.requires_target then
+        local targetUnit = player:GetSelection()
+
+        if not targetUnit or not targetUnit:IsInWorld() then
+            SendBlessingError(player, "no_target", "Вам нужно выбрать цель для этого благословения, " .. info.name .. ".")
+            PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "No target selected or target not in world")
             return
         end
-        PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Blessing found", {
-            blessing_name = info.name,
-            spell_id = info.spell_id
-        })
 
-        -- === ЛОГИКА ОБРАБОТКИ ЦЕЛИ ===
-        local finalSpellTarget = player -- По умолчанию цель - сам игрок
+        finalSpellTarget = targetUnit
 
-        if info.requires_target then
-            local targetUnit = player:GetSelection()
-
-            if not targetUnit or not targetUnit:IsInWorld() then
-                player:SendBroadcastMessage("Вам нужно выбрать цель для этого благословения, " .. info.name .. ".")
-                PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "No target selected or target not in world")
+        if info.is_offensive then
+            -- 1. Проверка на атаку самого себя
+            if targetUnit:GetGUID() == player:GetGUID() then
+                SendBlessingError(player, "target_self", ("Вы не можете атаковать себя с помощью %s!"):format(info.name))
+                PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Attempted self-attack")
                 return
             end
 
-            finalSpellTarget = targetUnit
-
-            if info.is_offensive then
-                -- 1. Проверка на атаку самого себя
-                if targetUnit:GetGUID() == player:GetGUID() then
-                    player:SendBroadcastMessage(("Вы не можете атаковать себя с помощью %s!"):format(info.name))
-                    PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Attempted self-attack")
-                    return
-                end
-
-                -- 2. Проверка дружебности
+            -- 2. Проверка дружебности
                 local checkRadius = 60.0
                 local friendlyUnits = player:GetFriendlyUnitsInRange(checkRadius)
                 
@@ -1061,14 +1213,14 @@ local function HandleRequestBlessing(player, data)
                 end
 
                 if isTargetFriendly then
-                    player:SendBroadcastMessage("Вы не можете атаковать дружественную цель с помощью " .. info.name .. "!")
+                    SendBlessingError(player, "target_friendly", "Вы не можете атаковать дружественную цель с помощью " .. info.name .. "!")
                     PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Attempted to attack friendly target")
                     return
                 end
 
                 -- 3. Проверка, жива ли цель
                 if not targetUnit:IsAlive() then
-                    player:SendBroadcastMessage("Ваша цель мертва.")
+                    SendBlessingError(player, "target_dead", "Ваша цель мертва.")
                     PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Target is dead")
                     return
                 end
@@ -1076,7 +1228,7 @@ local function HandleRequestBlessing(player, data)
                 -- 4. Проверка "атакуемости"
                 local success, isTargetable = pcall(targetUnit.IsTargetableForAttack, targetUnit)
                 if success and not isTargetable then
-                    player:SendBroadcastMessage("Эту цель нельзя атаковать.")
+                    SendBlessingError(player, "target_invalid", "Эту цель нельзя атаковать.")
                     PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Target not attackable")
                     return
                 end
@@ -1084,7 +1236,7 @@ local function HandleRequestBlessing(player, data)
                 -- 5. Проверка дистанции
                 local max_range = info.range or 40.0
                 if player:GetDistance(targetUnit) > max_range then
-                    player:SendBroadcastMessage("Ваша цель находится слишком далеко.")
+                    SendBlessingError(player, "target_too_far", "Ваша цель находится слишком далеко.")
                     PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Target too far away")
                     return
                 end
@@ -1095,7 +1247,7 @@ local function HandleRequestBlessing(player, data)
         
         -- Проверка активности ауры (только для не-атакующих)
         if not info.is_offensive and info.spell_id and finalSpellTarget:HasAura(info.spell_id) then
-            player:SendBroadcastMessage(("%s уже активен!"):format(info.name))
+            SendBlessingError(player, "already_has_aura", ("%s уже активен!"):format(info.name))
             PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Blessing already active")
             return
         end
@@ -1103,7 +1255,7 @@ local function HandleRequestBlessing(player, data)
         -- Проверка кулдауна - используем PatronGameLogicCore функции
         if not PatronGameLogicCore.CanUseBlessing(player, blessingID) then
             local remainingCooldown = PatronGameLogicCore.GetBlessingCooldown(player, blessingID)
-            player:SendBroadcastMessage(("Вы не можете использовать %s еще %.0f сек."):format(info.name, remainingCooldown))
+            SendBlessingError(player, "cooldown", ("Вы не можете использовать %s еще %.0f сек."):format(info.name, remainingCooldown))
             PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Blessing on cooldown", {
                 blessing_id = blessingID,
                 remaining_seconds = remainingCooldown
@@ -1115,7 +1267,7 @@ local function HandleRequestBlessing(player, data)
         if info.cost_item_id and info.cost_amount > 0 then
             -- Проверяем наличие через систему GameLogicCore
             if not PatronGameLogicCore.HasItem(player, info.cost_item_id, info.cost_amount) then
-                player:SendBroadcastMessage("Вам не хватает реагентов для этого благословения.")
+                SendBlessingError(player, "insufficient_reagents", "Вам не хватает реагентов для этого благословения.")
                 PatronLogger:Warning("MainAIO", "HandleRequestBlessing", "Insufficient reagents", {
                     required_item_id = info.cost_item_id,
                     required_amount = info.cost_amount
@@ -1126,7 +1278,7 @@ local function HandleRequestBlessing(player, data)
             -- Списываем через систему GameLogicCore (с логированием и валидацией)
             local removeResult = PatronGameLogicCore.RemoveItem(player, info.cost_item_id, info.cost_amount)
             if not removeResult.success then
-                player:SendBroadcastMessage("Не удалось списать реагенты для благословения.")
+                SendBlessingError(player, "reagent_removal_failed", "Не удалось списать реагенты для благословения.")
                 PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to remove reagents", {
                     error = removeResult.message
                 })
@@ -1150,26 +1302,46 @@ local function HandleRequestBlessing(player, data)
         -- Применяем эффект через GameLogicCore
         local effectResult = PatronGameLogicCore.ApplyBlessingEffect(player, finalSpellTarget, info)
         
-        if effectResult and effectResult.success then
-            player:SendBroadcastMessage(("Вы успешно использовали %s!"):format(info.name))
-            PatronLogger:Info("MainAIO", "HandleRequestBlessing", "Blessing applied successfully", {
-                player = playerName,
-                blessing_name = info.name
-            })
-        else
-            player:SendBroadcastMessage("Не удалось применить благословение.")
-            PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to apply blessing effect")
+    if effectResult and effectResult.success then
+        player:SendBroadcastMessage(("Вы успешно использовали %s!"):format(info.name))
+        PatronLogger:Info("MainAIO", "HandleRequestBlessing", "Blessing applied successfully", {
+            player = playerName,
+            blessing_name = info.name
+        })
+        
+        -- Проактивно отправляем обновленные кулдауны клиенту
+        local cooldowns = PatronGameLogicCore.playerCooldowns[tostring(player:GetGUIDLow())] or {}
+        local cooldownData = {}
+        
+        for blessingId, _ in pairs(cooldowns) do
+            local remaining = PatronGameLogicCore.GetBlessingCooldown(player, blessingId)
+            if remaining > 0 then
+                local blessingInfo = PatronGameLogicCore.ServerBlessingsConfig[blessingId]
+                local duration = blessingInfo and blessingInfo.cooldown_seconds or 60
+                
+                cooldownData[blessingId] = {
+                    remaining = remaining,
+                    duration = duration
+                }
+            end
         end
         
-    end) -- Конец корневого pcall
-
-    if not success_pcall then
-        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Critical error in RequestBlessing", {
-            error = tostring(result_pcall)
-        })
-        if player and pcall(player.GetName, player) then
-            player:SendBroadcastMessage("На сервере произошла критическая ошибка при обработке вашего запроса.")
+        -- Отправляем кулдауны без дополнительного запроса от клиента
+        SafeSendResponse(player, "UpdateCooldowns", cooldownData)
+        
+        -- Подсчитываем количество кулдаунов
+        local cooldownCount = 0
+        for _ in pairs(cooldownData) do
+            cooldownCount = cooldownCount + 1
         end
+        
+        PatronLogger:Debug("MainAIO", "HandleRequestBlessing", "Proactive cooldowns sent", {
+            player = playerName,
+            cooldown_count = cooldownCount
+        })
+    else
+        player:SendBroadcastMessage("Не удалось применить благословение.")
+        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to apply blessing effect")
     end
 end
 
@@ -1191,6 +1363,19 @@ local function CreateSafeHandler(handlerName, handlerFunc)
             return
         end
         
+        -- Depth guard to prevent runaway recursion
+        if SAFETY.ENABLE_REENTRANCY_GUARD then
+            __currentNestedDepth = __currentNestedDepth + 1
+            if __currentNestedDepth > SAFETY.MAX_NESTED_CALLS then
+                PatronLogger:Error("MainAIO", "CreateSafeHandler", "Nested call depth exceeded", {
+                    handler = handlerName,
+                    depth = __currentNestedDepth
+                })
+                __currentNestedDepth = __currentNestedDepth - 1
+                UpdateRequestStats(handlerName, false)
+                return
+            end
+        end
         local success, result = pcall(handlerFunc, player, ...)
         UpdateRequestStats(handlerName, success)
         
@@ -1198,6 +1383,10 @@ local function CreateSafeHandler(handlerName, handlerFunc)
             HandleAIOError(handlerName, player, result)
         end
         
+        if SAFETY.ENABLE_REENTRANCY_GUARD then
+            __currentNestedDepth = __currentNestedDepth - 1
+            if __currentNestedDepth < 0 then __currentNestedDepth = 0 end
+        end
         return result
     end
 end
@@ -1212,36 +1401,28 @@ local function HandleRequestCooldowns(player)
     local playerId = player:GetGUIDLow()
     local playerIdString = tostring(playerId)
     
-    -- ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ для отладки
-    PatronLogger:Debug("MainAIO", "HandleRequestCooldowns", "Debug info", {
-        player = player:GetName(),
-        playerId = playerId,
-        playerIdString = playerIdString,
-        cooldowns_table_exists = PatronGameLogicCore.playerCooldowns ~= nil,
-        player_entry_exists = PatronGameLogicCore.playerCooldowns and PatronGameLogicCore.playerCooldowns[playerIdString] ~= nil
-    })
+    -- Rate-limit spammy cooldown requests per player
+    if SAFETY.COOLDOWNS_MIN_INTERVAL and SAFETY.COOLDOWNS_MIN_INTERVAL > 0 then
+        local now = os.time()
+        local last = __lastCooldownsRequest[playerId]
+        if last and (now - last) < SAFETY.COOLDOWNS_MIN_INTERVAL then
+            -- Too soon; ignore to avoid server flooding/nesting
+            if AIO_CONFIG.LOG_ALL_REQUESTS then
+                PatronLogger:Debug("MainAIO", "HandleRequestCooldowns", "Request skipped due to rate limit", {
+                    player = player:GetName()
+                })
+            end
+            return
+        end
+        __lastCooldownsRequest[playerId] = now
+    end
     
     local cooldowns = PatronGameLogicCore.playerCooldowns[playerIdString] or {}
-    local currentTime = os.time()
     local cooldownData = {}
     
     -- Собираем актуальные кулдауны
-    local rawCooldownCount = 0
-    for blessingId, _ in pairs(cooldowns) do
-        rawCooldownCount = rawCooldownCount + 1
-    end
-    
-    PatronLogger:Debug("MainAIO", "HandleRequestCooldowns", "Raw cooldowns found", {
-        raw_cooldown_count = rawCooldownCount
-    })
-    
     for blessingId, _ in pairs(cooldowns) do
         local remaining = PatronGameLogicCore.GetBlessingCooldown(player, blessingId)
-        
-        PatronLogger:Debug("MainAIO", "HandleRequestCooldowns", "Checking blessing cooldown", {
-            blessing_id = blessingId,
-            remaining = remaining
-        })
         
         if remaining > 0 then
             local blessingInfo = PatronGameLogicCore.ServerBlessingsConfig[blessingId]
@@ -1292,7 +1473,7 @@ AIO.AddHandlers(ADDON_PREFIX, {
     UpdateBlessingPanel = CreateSafeHandler("UpdateBlessingPanel", HandleUpdateBlessingPanel),
     
     --=== БЛАГОСЛОВЕНИЯ - ИСПОЛЬЗОВАНИЕ ===--
-    RequestBlessing = CreateSafeHandler("RequestBlessing", HandleRequestBlessing),
+    RequestBlessing = CreateSafeHandler("RequestBlessing", HandleRequestBlessingWithMutex),
     RequestCooldowns = CreateSafeHandler("RequestCooldowns", HandleRequestCooldowns),
     
     --=== SMALLTALK ===--
