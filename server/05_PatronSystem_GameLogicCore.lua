@@ -793,16 +793,36 @@ function clamp(x, lo, hi) return (x<lo and lo) or (x>hi and hi) or x end
 function rand_pm(x) return 1 + (math.random(-x, x) * 0.01) end
 function rand_pm25() return rand_pm(25) end
 
+local function IsValidUnit(u)
+    return u and u.IsInWorld and u:IsInWorld() and u.IsAlive and u:IsAlive()
+           and u.GetTypeId and (u:GetTypeId() == 3 or u:GetTypeId() == 4)
+end
+
+local function SameMapPhase(a, b)
+    return a and b and a.GetMapId and b.GetMapId and a:GetMapId() == b:GetMapId()
+           and a.GetPhaseMask and b.GetPhaseMask and a:GetPhaseMask() == b:GetPhaseMask()
+end
+
 function DoBuff(caster, target, info)
   local sid = tonumber(info.spell_id or 0) or 0
-  if sid <= 0 then return end
-  if target:HasAura(sid) then return end
-
-  local ok, auraObj = pcall(caster.CastCustomSpell, caster, target, sid, true)
-  if not ok then
-    print("[BlessingUI] AddAura failed for spell "..tostring(sid))
+  if sid <= 0 then
+    PatronLogger:Warning("GameLogicCore", "DoBuff", "Invalid spell id", {spell_id = sid})
     return
   end
+
+  if not IsValidUnit(caster) or not IsValidUnit(target) then
+    PatronLogger:Warning("GameLogicCore", "DoBuff", "Invalid caster or target", {spell_id = sid})
+    return
+  end
+
+  if not SameMapPhase(caster, target) then
+    PatronLogger:Warning("GameLogicCore", "DoBuff", "Caster and target not on same map or phase", {spell_id = sid})
+    return
+  end
+
+  if target:HasAura(sid) then return end
+
+  caster:CastCustomSpell(target, sid, true)
 end
 
 
@@ -932,33 +952,50 @@ end
 -- Точная копия StartGroundAoE из старого файла, но с динамическим расчетом урона
 if not StartGroundAoE then
   function StartGroundAoE(player, centerUnit, info)
-    if not (player and centerUnit and player:IsInWorld() and centerUnit:IsInWorld()) then return end
+    if not IsValidUnit(player) or not IsValidUnit(centerUnit) then
+      PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Invalid player or center unit")
+      return
+    end
+    if not SameMapPhase(player, centerUnit) then
+      PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Player and center unit map/phase mismatch")
+      return
+    end
 
     -- фиксируем координаты центра «лужи»
     local cx, cy, cz = centerUnit:GetX(), centerUnit:GetY(), centerUnit:GetZ()
 
-    local spellId    = tonumber(info.spell_id) or 190356
+    local spellId    = tonumber(info.spell_id) or 0
     local radius     = tonumber(info.radius)   or 12.0
     local tickMs     = tonumber(info.tick_ms)  or 500
     local durationMs = tonumber(info.duration_ms) or 4000
-    local spell_tick_id = tonumber(info.spell_tick_id) or 2136
-    
+    local spell_tick_id = tonumber(info.spell_tick_id) or 0
+
+    if spellId <= 0 or spell_tick_id <= 0 or radius <= 0 or tickMs <= 0 or durationMs <= 0 then
+      PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Invalid parameters", {spell_id = spellId, tick_id = spell_tick_id})
+      return
+    end
+
     -- Рассчитываем базовый урон один раз (как основу для пересчета)
     local singleBase = PatronCalc_SingleBudget(player, info)
     if singleBase <= 0 then return end
-    
+
     print(("[BlessingUI - Server DEBUG] StartGroundAoE: center=(%.1f,%.1f,%.1f) R=%.1f singleBase=%d"):format(cx, cy, cz, radius, singleBase))
 
     -- визуал по земле (мгновенно, без GCD/стоимости)
-    pcall(player.CastSpellAoF, player, cx, cy, cz, spellId, true)
+    if IsValidUnit(player) then
+      player:CastSpellAoF(cx, cy, cz, spellId, true)
+    else
+      PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Player became invalid before CastSpellAoF")
+      return
+    end
 
     local ticks = math.max(1, math.floor(durationMs / tickMs))
 
     -- Тик привязываем к Player: RegisterEvent даёт (eventId, delay, repeats, worldobject)
     local function onTick(eventId, _delay, repeatsLeft, wo)
       -- wo — это живой WorldObject (= твой Player) на момент вызова
-      if not (wo and wo.IsInWorld and wo:IsInWorld()) then
-        -- таймер уедет автоматически, но можно снять явно
+      if not IsValidUnit(wo) then
+        PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Invalid world object during tick")
         if wo and wo.RemoveEventById then wo:RemoveEventById(eventId) end
         return
       end
@@ -975,8 +1012,10 @@ if not StartGroundAoE then
       
       -- Собираем валидные цели
       for _, u in ipairs(pool) do
-        if u and u:IsInWorld() and u:IsAlive() and (u:GetDistance(cx, cy, cz) or 1e9) <= radius then
+        if IsValidUnit(u) and SameMapPhase(wo, u) and (u:GetDistance(cx, cy, cz) or 1e9) <= radius then
           validTargets[#validTargets + 1] = u
+        else
+          PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Invalid target candidate during tick")
         end
       end
       
@@ -986,10 +1025,11 @@ if not StartGroundAoE then
         local bp0, bp1, bp2 = build_bp_triplet(info, dmgTick)
 
         for _, u in ipairs(validTargets) do
-          if u and u.IsInWorld and u:IsInWorld() and u:IsAlive()
-             and (u:GetDistance(cx, cy, cz) or 1e9) <= radius then
-            local ok = pcall(wo.CastCustomSpell, wo, u, spell_tick_id, true, bp0, bp1, bp2)
-            if ok then hits = hits + 1 end
+          if IsValidUnit(u) and SameMapPhase(wo, u) and (u:GetDistance(cx, cy, cz) or 1e9) <= radius then
+            wo:CastCustomSpell(u, spell_tick_id, true, bp0, bp1, bp2)
+            hits = hits + 1
+          else
+            PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Skipping invalid target during tick")
           end
         end
       end
@@ -1120,39 +1160,35 @@ function PatronGameLogicCore.RemoveAura(player, spellId)
 end
 
 -- Воспроизвести звуковой эффект
+
 function PatronGameLogicCore.PlaySoundEffect(player, soundId)
     PatronLogger:Debug("GameLogicCore", "PlaySoundEffect", "Playing sound effect", {
         player = player:GetName(),
         sound_id = soundId
     })
-    
+
     local success = false
     local message = ""
-    
+
     if not soundId or soundId <= 0 then
         message = "Invalid sound ID: " .. tostring(soundId)
         PatronLogger:Warning("GameLogicCore", "PlaySoundEffect", message)
+    elseif not IsValidUnit(player) then
+        message = "Invalid player for sound playback"
+        PatronLogger:Warning("GameLogicCore", "PlaySoundEffect", message, {sound_id = soundId})
     else
-        -- Используем WorldObject:PlayDirectSound для проигрывания звука игроку
-        pcall(function()
-            player:PlayDirectSound(soundId, player)
-            success = true
-            message = "Sound " .. soundId .. " played successfully"
-            PatronLogger:Debug("GameLogicCore", "PlaySoundEffect", "Sound played successfully", {
-                sound_id = soundId
-            })
-        end)
-        
-        if not success then
-            message = "Failed to play sound " .. soundId
-            PatronLogger:Warning("GameLogicCore", "PlaySoundEffect", message)
-        end
+        player:PlayDirectSound(soundId, player)
+        success = true
+        message = "Sound " .. soundId .. " played successfully"
+        PatronLogger:Debug("GameLogicCore", "PlaySoundEffect", "Sound played successfully", {
+            sound_id = soundId
+        })
     end
-    
+
     return {
         success = success,
         message = message,
-        action = {Type = "PLAY_SOUND", SoundID = soundId}
+        action = {Type = "PLAY_SOUND", SoundID = soundId},
     }
 end
 
@@ -1161,34 +1197,42 @@ end
 ============================================================================]]
 
 -- ПЛЕЙСХОЛДЕР: Дать предмет игроку
+
 function PatronGameLogicCore.AddItem(player, itemId, amount)
     PatronLogger:Info("GameLogicCore", "AddItem", "Adding item to player", {
         player = player:GetName(),
         item_id = itemId,
         amount = amount
     })
-    
-    -- Используем Eluna Player API для добавления предмета
-    local success = pcall(function()
-        player:AddItem(itemId, amount)
-    end)
-    
-    if success then
-        player:SendBroadcastMessage("|cff00ff00[Покровители]|r Получен предмет: " .. itemId .. " x" .. amount)
-        return {
-            success = true,
-            message = "Added " .. amount .. " of item " .. itemId,
-            action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount}
-        }
-    else
+
+    itemId = tonumber(itemId) or 0
+    amount = tonumber(amount) or 0
+    if itemId <= 0 or amount <= 0 then
+        PatronLogger:Warning("GameLogicCore", "AddItem", "Invalid item parameters", {item_id = itemId, amount = amount})
         return {
             success = false,
-            message = "Ошибка добавления предмета " .. itemId,
-            action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount}
+            message = "Invalid item parameters",
+            action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount},
         }
     end
-end
 
+    if not IsValidUnit(player) then
+        PatronLogger:Warning("GameLogicCore", "AddItem", "Invalid player state", {item_id = itemId, amount = amount})
+        return {
+            success = false,
+            message = "Invalid player",
+            action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount},
+        }
+    end
+
+    player:AddItem(itemId, amount)
+    player:SendBroadcastMessage("|cff00ff00[Покровители]|r Получен предмет: " .. itemId .. " x" .. amount)
+    return {
+        success = true,
+        message = "Added " .. amount .. " of item " .. itemId,
+        action = {Type = "ADD_ITEM", ItemID = itemId, Amount = amount},
+    }
+end
 -- Алиас для покупок (используется в HandlePurchaseRequestCore)
 function PatronGameLogicCore.GiveItem(player, itemId, amount)
     return PatronGameLogicCore.AddItem(player, itemId, amount)
