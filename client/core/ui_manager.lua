@@ -3,6 +3,8 @@
   Чистый координатор окон без бизнес-логики + BlessingWindow + ShopWindow
 ============================================================================]]
 
+local SafeCall = require("util.safe_call")
+
 -- Заполняем UIManager в уже созданном неймспейсе
 PatronSystemNS.UIManager = {
     -- Состояние UI
@@ -54,10 +56,7 @@ function PatronSystemNS.UIManager:TriggerEvent(eventName, ...)
     PatronSystemNS.Logger:UI("Событие: " .. eventName .. " (" .. #callbacks .. " слушателей)")
     
     for _, callback in ipairs(callbacks) do
-        local success, err = pcall(callback, ...)
-        if not success then
-            PatronSystemNS.Logger:Error("Ошибка в обработчике события " .. eventName .. ": " .. tostring(err))
-        end
+        SafeCall(callback, ...)
     end
 end
 

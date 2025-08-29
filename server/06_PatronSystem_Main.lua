@@ -63,6 +63,7 @@ PatronLogger:Info("MainAIO", "Initialize", "Dependency check", {
 -- Загружаем AIO и устанавливаем префикс
 local AIO = AIO or require("AIO")
 local ADDON_PREFIX = "PatronSystem"
+local SafeCall = require("util.safe_call")
 
 -- Загружаем данные покровителей и последователей
 PatronLogger:Info("MainAIO", "Initialize", "Loading patrons data...")
@@ -201,18 +202,11 @@ local function ProcessNextBlessingRequest(playerGUID)
     SetPlayerBlessingBusy(playerGUID, true)
     
     -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
-    local success, error = pcall(HandleRequestBlessingCore, nextRequest.player, nextRequest.data)
-    
+    SafeCall(HandleRequestBlessingCore, nextRequest.player, nextRequest.data)
+
     -- Освобождаем мьютекс
     SetPlayerBlessingBusy(playerGUID, false)
-    
-    if not success then
-        PatronLogger:Error("MainAIO", "ProcessNextBlessingRequest", "Error processing queued request", {
-            playerGUID = playerGUID,
-            error = tostring(error)
-        })
-    end
-    
+
     -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
     ProcessNextBlessingRequest(playerGUID)
     
@@ -275,18 +269,11 @@ local function ProcessNextPurchaseRequest(playerGUID)
     SetPlayerPurchaseBusy(playerGUID, true)
     
     -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
-    local success, error = pcall(HandlePurchaseRequestCore, nextRequest.player, nextRequest.data)
-    
+    SafeCall(HandlePurchaseRequestCore, nextRequest.player, nextRequest.data)
+
     -- Освобождаем мьютекс
     SetPlayerPurchaseBusy(playerGUID, false)
-    
-    if not success then
-        PatronLogger:Error("MainAIO", "ProcessNextPurchaseRequest", "Error processing queued purchase", {
-            playerGUID = playerGUID,
-            error = tostring(error)
-        })
-    end
-    
+
     -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
     ProcessNextPurchaseRequest(playerGUID)
     
@@ -520,26 +507,18 @@ local function SafeSendResponse(player, responseType, data)
         return false
     end
     
-    local success, err = pcall(function()
+    local success = SafeCall(function()
         AIO.Handle(player, ADDON_PREFIX, responseType, data)
     end)
-    
-    if success then
-        if AIO_CONFIG.LOG_RESPONSES then
-            PatronLogger:AIO("MainAIO", "SafeSendResponse", "Response sent: " .. responseType, {
-                player = player:GetName(),
-                response_type = responseType
-            })
-        end
-        return true
-    else
-        PatronLogger:Error("MainAIO", "SafeSendResponse", "Failed to send response", {
+
+    if success and AIO_CONFIG.LOG_RESPONSES then
+        PatronLogger:AIO("MainAIO", "SafeSendResponse", "Response sent: " .. responseType, {
             player = player:GetName(),
-            response_type = responseType,
-            error = tostring(err)
+            response_type = responseType
         })
-        return false
     end
+
+    return success
 end
 
 -- Обработчик ошибок для всех AIO запросов
@@ -1266,18 +1245,11 @@ local function HandleRequestBlessingWithMutex(player, data)
     })
     
     -- Обрабатываем запрос
-    local success, error = pcall(HandleRequestBlessingCore, player, data)
-    
+    SafeCall(HandleRequestBlessingCore, player, data)
+
     -- Освобождаем мьютекс
     SetPlayerBlessingBusy(playerGUID, false)
-    
-    if not success then
-        PatronLogger:Error("MainAIO", "HandleRequestBlessingWithMutex", "Error in blessing processing", {
-            player = player:GetName(),
-            error = tostring(error)
-        })
-    end
-    
+
     -- Обрабатываем следующий запрос из очереди (если есть)
     ProcessNextBlessingRequest(playerGUID)
 end
@@ -1755,27 +1727,22 @@ local function HandlePurchaseRequest(player, data)
     })
     
     -- Обрабатываем запрос
-    local success, error = pcall(HandlePurchaseRequestCore, player, data)
-    
+    local success = SafeCall(HandlePurchaseRequestCore, player, data)
+
     -- Освобождаем мьютекс
     SetPlayerPurchaseBusy(playerGUID, false)
-    
+
     if not success then
-        PatronLogger:Error("MainAIO", "HandlePurchaseRequest", "Error in purchase processing", {
-            error = tostring(error),
-            player = player:GetName()
-        })
-        
         local errorResponse = {
             message = "Внутренняя ошибка при обработке покупки",
             errorType = "internal_error"
         }
-        
+
         AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
-        
+
         -- Не кэшируем внутренние ошибки, так как они могут быть временными
     end
-    
+
     -- Обрабатываем следующий запрос из очереди
     ProcessNextPurchaseRequest(playerGUID)
 end
@@ -1811,9 +1778,9 @@ local function CreateSafeHandler(handlerName, handlerFunc)
                 return
             end
         end
-        local success, result = pcall(handlerFunc, player, ...)
+        local success, result = SafeCall(handlerFunc, player, ...)
         UpdateRequestStats(handlerName, success)
-        
+
         if not success then
             HandleAIOError(handlerName, player, result)
         end

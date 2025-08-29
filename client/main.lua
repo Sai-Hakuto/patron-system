@@ -4,6 +4,7 @@
 ============================================================================]]
 
 local AIO = AIO or require("AIO")
+local SafeCall = require("util.safe_call")
 if AIO.AddAddon() then return end
 
 --[[==========================================================================
@@ -62,10 +63,7 @@ function EventDispatcher:TriggerEvent(eventName, ...)
     PatronSystemNS.Logger:Debug("Событие: " .. eventName .. " (" .. #listeners .. " слушателей)")
     
     for _, listener in ipairs(listeners) do
-        local success, err = pcall(listener.callback, ...)
-        if not success then
-            PatronSystemNS.Logger:Error("Ошибка в " .. listener.module .. " при обработке " .. eventName .. ": " .. tostring(err))
-        end
+        SafeCall(listener.callback, ...)
     end
 end
 
