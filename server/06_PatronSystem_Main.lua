@@ -197,15 +197,26 @@ local function ProcessNextBlessingRequest(playerGUID)
         playerGUID = playerGUID,
         remaining_in_queue = #queue
     })
-    
+
     -- Устанавливаем мьютекс для следующего запроса
     SetPlayerBlessingBusy(playerGUID, true)
-    
-    -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
-    SafeCall(HandleRequestBlessingCore, nextRequest.player, nextRequest.data)
 
-    -- Освобождаем мьютекс
-    SetPlayerBlessingBusy(playerGUID, false)
+    local player = nextRequest.player
+    local target = nextRequest.target
+
+    -- Повторная валидация player/target перед обработкой
+    if AIO_CONFIG.VALIDATE_PLAYERS and (not ValidatePlayer(player) or (target and not ValidatePlayer(target))) then
+        PatronLogger:Warning("MainAIO", "ProcessNextBlessingRequest", "Invalid player or target, cancelling queued request", {
+            playerGUID = playerGUID
+        })
+        SetPlayerBlessingBusy(playerGUID, false)
+    else
+        -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
+        SafeCall(HandleRequestBlessingCore, player, nextRequest.data)
+
+        -- Освобождаем мьютекс
+        SetPlayerBlessingBusy(playerGUID, false)
+    end
 
     -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
     ProcessNextBlessingRequest(playerGUID)
@@ -264,15 +275,26 @@ local function ProcessNextPurchaseRequest(playerGUID)
         playerGUID = playerGUID,
         remaining_in_queue = #queue
     })
-    
+
     -- Устанавливаем мьютекс для следующего запроса
     SetPlayerPurchaseBusy(playerGUID, true)
-    
-    -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
-    SafeCall(HandlePurchaseRequestCore, nextRequest.player, nextRequest.data)
 
-    -- Освобождаем мьютекс
-    SetPlayerPurchaseBusy(playerGUID, false)
+    local player = nextRequest.player
+    local target = nextRequest.target
+
+    -- Повторная валидация player/target перед обработкой
+    if AIO_CONFIG.VALIDATE_PLAYERS and (not ValidatePlayer(player) or (target and not ValidatePlayer(target))) then
+        PatronLogger:Warning("MainAIO", "ProcessNextPurchaseRequest", "Invalid player or target, cancelling queued purchase", {
+            playerGUID = playerGUID
+        })
+        SetPlayerPurchaseBusy(playerGUID, false)
+    else
+        -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
+        SafeCall(HandlePurchaseRequestCore, player, nextRequest.data)
+
+        -- Освобождаем мьютекс
+        SetPlayerPurchaseBusy(playerGUID, false)
+    end
 
     -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
     ProcessNextPurchaseRequest(playerGUID)
@@ -365,14 +387,35 @@ local function ValidatePlayer(player)
         PatronLogger:Error("MainAIO", "ValidatePlayer", "Player object is nil")
         return false
     end
-    
-    if not player:IsInWorld() then
-        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Player is not in world", {
-            player = player:GetName()
+
+    if type(player) ~= "userdata" then
+        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Player object has invalid type", {
+            type = type(player)
         })
         return false
     end
-    
+
+    if (player.GetObjectType and player:GetObjectType() ~= "Player") or (player.IsPlayer and not player:IsPlayer()) then
+        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Object is not a player", {
+            object_type = player.GetObjectType and player:GetObjectType() or "unknown"
+        })
+        return false
+    end
+
+    if not player:IsInWorld() then
+        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Player is not in world", {
+            player = player.GetName and player:GetName() or "unknown"
+        })
+        return false
+    end
+
+    if player.IsAlive and not player:IsAlive() then
+        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Player is not alive", {
+            player = player.GetName and player:GetName() or "unknown"
+        })
+        return false
+    end
+
     return true
 end
 
