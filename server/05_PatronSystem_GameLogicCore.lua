@@ -981,12 +981,11 @@ if not StartGroundAoE then
 
     -- Рассчитываем базовый урон один раз (как основу для пересчета)
     local singleBase = PatronCalc_SingleBudget(player, info)
+    PatronLogger:Debug("GameLogicCore", "StartGroundAoE", "Computed damage budget", {budget = singleBase})
     if singleBase <= 0 then
-      PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Zero damage budget")
-      return false, "Zero damage budget"
+      PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Zero damage budget", {budget = singleBase})
+      return false, "zero_budget"
     end
-
-    print(("[BlessingUI - Server DEBUG] StartGroundAoE: center=(%.1f,%.1f,%.1f) R=%.1f singleBase=%d"):format(cx, cy, cz, radius, singleBase))
 
     -- визуал по земле (мгновенно, без GCD/стоимости)
     if IsValidUnit(player) then
