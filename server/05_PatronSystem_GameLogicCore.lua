@@ -749,7 +749,11 @@ function PatronGameLogicCore.ApplyBlessingEffect(player, finalSpellTarget, info)
     -- Применяем эффект в зависимости от типа благословения
     if info.is_aoe then
         -- Используем стабильную StartGroundAoE
-        StartGroundAoE(player, finalSpellTarget, info)
+        local ok, reason = StartGroundAoE(player, finalSpellTarget, info)
+        if not ok then
+            PatronLogger:Warning("GameLogicCore", "ApplyBlessingEffect", "StartGroundAoE failed", {reason = reason})
+            return {success = false, message = reason}
+        end
     elseif info.is_offensive then
         -- Динамический расчет урона для single атаки
         local singleDamage = PatronCalc_SingleBudget(player, info)
@@ -769,13 +773,13 @@ function PatronGameLogicCore.ApplyBlessingEffect(player, finalSpellTarget, info)
 
     -- Устанавливаем кулдаун через новую систему
     PatronGameLogicCore.SetBlessingCooldown(player, blessingID)
-    
+
     PatronLogger:Info("GameLogicCore", "ApplyBlessingEffect", "Blessing effect applied successfully", {
         blessing_id = blessingID,
         player = player:GetName(),
         cooldown_seconds = info.cooldown_seconds
     })
-    
+
     return {success = true, message = "Blessing applied successfully"}
 end
 
@@ -954,11 +958,11 @@ if not StartGroundAoE then
   function StartGroundAoE(player, centerUnit, info)
     if not IsValidUnit(player) or not IsValidUnit(centerUnit) then
       PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Invalid player or center unit")
-      return
+      return false, "Invalid player or center unit"
     end
     if not SameMapPhase(player, centerUnit) then
       PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Player and center unit map/phase mismatch")
-      return
+      return false, "Map or phase mismatch"
     end
 
     -- фиксируем координаты центра «лужи»
@@ -972,12 +976,15 @@ if not StartGroundAoE then
 
     if spellId <= 0 or spell_tick_id <= 0 or radius <= 0 or tickMs <= 0 or durationMs <= 0 then
       PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Invalid parameters", {spell_id = spellId, tick_id = spell_tick_id})
-      return
+      return false, "Invalid parameters"
     end
 
     -- Рассчитываем базовый урон один раз (как основу для пересчета)
     local singleBase = PatronCalc_SingleBudget(player, info)
-    if singleBase <= 0 then return end
+    if singleBase <= 0 then
+      PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Zero damage budget")
+      return false, "Zero damage budget"
+    end
 
     print(("[BlessingUI - Server DEBUG] StartGroundAoE: center=(%.1f,%.1f,%.1f) R=%.1f singleBase=%d"):format(cx, cy, cz, radius, singleBase))
 
@@ -986,7 +993,7 @@ if not StartGroundAoE then
       player:CastSpellAoF(cx, cy, cz, spellId, true)
     else
       PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Player became invalid before CastSpellAoF")
-      return
+      return false, "Player invalid before CastSpellAoF"
     end
 
     local ticks = math.max(1, math.floor(durationMs / tickMs))
@@ -1044,6 +1051,7 @@ if not StartGroundAoE then
 
     -- Привязанный к Player таймер (безопаснее, чем глобальный CreateLuaEvent)
     player:RegisterEvent(onTick, tickMs, ticks)
+    return true
   end
 end
 
