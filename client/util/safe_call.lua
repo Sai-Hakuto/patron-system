@@ -22,5 +22,5 @@ local function SafeCall(fn, ...)
     end
 end
 
-return SafeCall
+PatronSystemNS.SafeCall = SafeCall
 
