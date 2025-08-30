@@ -797,9 +797,10 @@ function clamp(x, lo, hi) return (x<lo and lo) or (x>hi and hi) or x end
 function rand_pm(x) return 1 + (math.random(-x, x) * 0.01) end
 function rand_pm25() return rand_pm(25) end
 
-local function IsValidUnit(u)
-    return u and u.IsInWorld and u:IsInWorld() and u.IsAlive and u:IsAlive()
+local function IsValidUnit(u, allowDead)
+    return u and u.IsInWorld and u:IsInWorld()
            and u.GetTypeId and (u:GetTypeId() == 3 or u:GetTypeId() == 4)
+           and (allowDead or (u.IsAlive and u:IsAlive()))
 end
 
 local function SameMapPhase(a, b)
@@ -956,7 +957,7 @@ end
 -- Точная копия StartGroundAoE из старого файла, но с динамическим расчетом урона
 if not StartGroundAoE then
   function StartGroundAoE(player, centerUnit, info)
-    if not IsValidUnit(player) or not IsValidUnit(centerUnit) then
+    if not IsValidUnit(player) or not IsValidUnit(centerUnit, true) then
       PatronLogger:Warning("GameLogicCore", "StartGroundAoE", "Invalid player or center unit")
       return false, "Invalid player or center unit"
     end
