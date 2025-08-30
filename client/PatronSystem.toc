@@ -9,7 +9,6 @@
 
 # Инициализация неймспейса
 init.lua
-util/safe_call.lua
 
 # Конфигурация
 config.lua

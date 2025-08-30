@@ -63,7 +63,6 @@ PatronLogger:Info("MainAIO", "Initialize", "Dependency check", {
 -- Загружаем AIO и устанавливаем префикс
 local AIO = AIO or require("AIO")
 local ADDON_PREFIX = "PatronSystem"
-local SafeCall = require("util.safe_call")
 
 -- Загружаем данные покровителей и последователей
 PatronLogger:Info("MainAIO", "Initialize", "Loading patrons data...")
@@ -197,27 +196,23 @@ local function ProcessNextBlessingRequest(playerGUID)
         playerGUID = playerGUID,
         remaining_in_queue = #queue
     })
-
+    
     -- Устанавливаем мьютекс для следующего запроса
     SetPlayerBlessingBusy(playerGUID, true)
-
-    local player = nextRequest.player
-    local target = nextRequest.target
-
-    -- Повторная валидация player/target перед обработкой
-    if AIO_CONFIG.VALIDATE_PLAYERS and (not ValidatePlayer(player) or (target and not ValidatePlayer(target))) then
-        PatronLogger:Warning("MainAIO", "ProcessNextBlessingRequest", "Invalid player or target, cancelling queued request", {
-            playerGUID = playerGUID
+    
+    -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
+    local success, error = pcall(HandleRequestBlessingCore, nextRequest.player, nextRequest.data)
+    
+    -- Освобождаем мьютекс
+    SetPlayerBlessingBusy(playerGUID, false)
+    
+    if not success then
+        PatronLogger:Error("MainAIO", "ProcessNextBlessingRequest", "Error processing queued request", {
+            playerGUID = playerGUID,
+            error = tostring(error)
         })
-        SetPlayerBlessingBusy(playerGUID, false)
-    else
-        -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
-        SafeCall(HandleRequestBlessingCore, player, nextRequest.data)
-
-        -- Освобождаем мьютекс
-        SetPlayerBlessingBusy(playerGUID, false)
     end
-
+    
     -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
     ProcessNextBlessingRequest(playerGUID)
     
@@ -275,27 +270,23 @@ local function ProcessNextPurchaseRequest(playerGUID)
         playerGUID = playerGUID,
         remaining_in_queue = #queue
     })
-
+    
     -- Устанавливаем мьютекс для следующего запроса
     SetPlayerPurchaseBusy(playerGUID, true)
-
-    local player = nextRequest.player
-    local target = nextRequest.target
-
-    -- Повторная валидация player/target перед обработкой
-    if AIO_CONFIG.VALIDATE_PLAYERS and (not ValidatePlayer(player) or (target and not ValidatePlayer(target))) then
-        PatronLogger:Warning("MainAIO", "ProcessNextPurchaseRequest", "Invalid player or target, cancelling queued purchase", {
-            playerGUID = playerGUID
+    
+    -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
+    local success, error = pcall(HandlePurchaseRequestCore, nextRequest.player, nextRequest.data)
+    
+    -- Освобождаем мьютекс
+    SetPlayerPurchaseBusy(playerGUID, false)
+    
+    if not success then
+        PatronLogger:Error("MainAIO", "ProcessNextPurchaseRequest", "Error processing queued purchase", {
+            playerGUID = playerGUID,
+            error = tostring(error)
         })
-        SetPlayerPurchaseBusy(playerGUID, false)
-    else
-        -- Обрабатываем запрос напрямую (минуя проверку мьютекса)
-        SafeCall(HandlePurchaseRequestCore, player, nextRequest.data)
-
-        -- Освобождаем мьютекс
-        SetPlayerPurchaseBusy(playerGUID, false)
     end
-
+    
     -- Рекурсивно обрабатываем следующий запрос из очереди (если есть)
     ProcessNextPurchaseRequest(playerGUID)
     
@@ -387,35 +378,14 @@ local function ValidatePlayer(player)
         PatronLogger:Error("MainAIO", "ValidatePlayer", "Player object is nil")
         return false
     end
-
-    if type(player) ~= "userdata" then
-        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Player object has invalid type", {
-            type = type(player)
-        })
-        return false
-    end
-
-    if (player.GetObjectType and player:GetObjectType() ~= "Player") or (player.IsPlayer and not player:IsPlayer()) then
-        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Object is not a player", {
-            object_type = player.GetObjectType and player:GetObjectType() or "unknown"
-        })
-        return false
-    end
-
+    
     if not player:IsInWorld() then
         PatronLogger:Warning("MainAIO", "ValidatePlayer", "Player is not in world", {
-            player = player.GetName and player:GetName() or "unknown"
+            player = player:GetName()
         })
         return false
     end
-
-    if player.IsAlive and not player:IsAlive() then
-        PatronLogger:Warning("MainAIO", "ValidatePlayer", "Player is not alive", {
-            player = player.GetName and player:GetName() or "unknown"
-        })
-        return false
-    end
-
+    
     return true
 end
 
@@ -550,18 +520,26 @@ local function SafeSendResponse(player, responseType, data)
         return false
     end
     
-    local success = SafeCall(function()
+    local success, err = pcall(function()
         AIO.Handle(player, ADDON_PREFIX, responseType, data)
     end)
-
-    if success and AIO_CONFIG.LOG_RESPONSES then
-        PatronLogger:AIO("MainAIO", "SafeSendResponse", "Response sent: " .. responseType, {
+    
+    if success then
+        if AIO_CONFIG.LOG_RESPONSES then
+            PatronLogger:AIO("MainAIO", "SafeSendResponse", "Response sent: " .. responseType, {
+                player = player:GetName(),
+                response_type = responseType
+            })
+        end
+        return true
+    else
+        PatronLogger:Error("MainAIO", "SafeSendResponse", "Failed to send response", {
             player = player:GetName(),
-            response_type = responseType
+            response_type = responseType,
+            error = tostring(err)
         })
+        return false
     end
-
-    return success
 end
 
 -- Обработчик ошибок для всех AIO запросов
@@ -1288,11 +1266,18 @@ local function HandleRequestBlessingWithMutex(player, data)
     })
     
     -- Обрабатываем запрос
-    SafeCall(HandleRequestBlessingCore, player, data)
-
+    local success, error = pcall(HandleRequestBlessingCore, player, data)
+    
     -- Освобождаем мьютекс
     SetPlayerBlessingBusy(playerGUID, false)
-
+    
+    if not success then
+        PatronLogger:Error("MainAIO", "HandleRequestBlessingWithMutex", "Error in blessing processing", {
+            player = player:GetName(),
+            error = tostring(error)
+        })
+    end
+    
     -- Обрабатываем следующий запрос из очереди (если есть)
     ProcessNextBlessingRequest(playerGUID)
 end
@@ -1510,8 +1495,8 @@ HandleRequestBlessingCore = function(player, data)
             cooldown_count = cooldownCount
         })
     else
-        SendBlessingError(player, "effect_failed", effectResult and effectResult.message or "Не удалось применить благословение.")
-        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to apply blessing effect", {reason = effectResult and effectResult.message})
+        player:SendBroadcastMessage("Не удалось применить благословение.")
+        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to apply blessing effect")
     end
 end
 
@@ -1770,22 +1755,27 @@ local function HandlePurchaseRequest(player, data)
     })
     
     -- Обрабатываем запрос
-    local success = SafeCall(HandlePurchaseRequestCore, player, data)
-
+    local success, error = pcall(HandlePurchaseRequestCore, player, data)
+    
     -- Освобождаем мьютекс
     SetPlayerPurchaseBusy(playerGUID, false)
-
+    
     if not success then
+        PatronLogger:Error("MainAIO", "HandlePurchaseRequest", "Error in purchase processing", {
+            error = tostring(error),
+            player = player:GetName()
+        })
+        
         local errorResponse = {
             message = "Внутренняя ошибка при обработке покупки",
             errorType = "internal_error"
         }
-
+        
         AIO.Handle(player, "PatronSystem", "PurchaseError", errorResponse)
-
+        
         -- Не кэшируем внутренние ошибки, так как они могут быть временными
     end
-
+    
     -- Обрабатываем следующий запрос из очереди
     ProcessNextPurchaseRequest(playerGUID)
 end
@@ -1821,9 +1811,9 @@ local function CreateSafeHandler(handlerName, handlerFunc)
                 return
             end
         end
-        local success, result = SafeCall(handlerFunc, player, ...)
+        local success, result = pcall(handlerFunc, player, ...)
         UpdateRequestStats(handlerName, success)
-
+        
         if not success then
             HandleAIOError(handlerName, player, result)
         end

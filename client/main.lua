@@ -3,12 +3,7 @@
   Централизованные AIO обработчики + чистая система событий
 ============================================================================]]
 
-local AIO = AIO
-local SafeCall = PatronSystemNS.SafeCall
-if not AIO then
-    print("|cffff0000[PatronSystem ERROR]|r AIO library is not available")
-    return
-end
+local AIO = AIO or require("AIO")
 if AIO.AddAddon() then return end
 
 --[[==========================================================================
@@ -67,7 +62,10 @@ function EventDispatcher:TriggerEvent(eventName, ...)
     PatronSystemNS.Logger:Debug("Событие: " .. eventName .. " (" .. #listeners .. " слушателей)")
     
     for _, listener in ipairs(listeners) do
-        SafeCall(listener.callback, ...)
+        local success, err = pcall(listener.callback, ...)
+        if not success then
+            PatronSystemNS.Logger:Error("Ошибка в " .. listener.module .. " при обработке " .. eventName .. ": " .. tostring(err))
+        end
     end
 end
 
