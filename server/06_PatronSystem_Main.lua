@@ -1510,8 +1510,8 @@ HandleRequestBlessingCore = function(player, data)
             cooldown_count = cooldownCount
         })
     else
-        player:SendBroadcastMessage("Не удалось применить благословение.")
-        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to apply blessing effect")
+        SendBlessingError(player, "effect_failed", effectResult and effectResult.message or "Не удалось применить благословение.")
+        PatronLogger:Error("MainAIO", "HandleRequestBlessing", "Failed to apply blessing effect", {reason = effectResult and effectResult.message})
     end
 end
 
