@@ -3,7 +3,7 @@
   Чистый координатор окон без бизнес-логики + BlessingWindow + ShopWindow
 ============================================================================]]
 
-local SafeCall = require("util.safe_call")
+local SafeCall = PatronSystemNS.SafeCall
 
 -- Заполняем UIManager в уже созданном неймспейсе
 PatronSystemNS.UIManager = {

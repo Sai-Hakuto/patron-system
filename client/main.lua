@@ -3,8 +3,12 @@
   Централизованные AIO обработчики + чистая система событий
 ============================================================================]]
 
-local AIO = AIO or require("AIO")
-local SafeCall = require("util.safe_call")
+local AIO = AIO
+local SafeCall = PatronSystemNS.SafeCall
+if not AIO then
+    print("|cffff0000[PatronSystem ERROR]|r AIO library is not available")
+    return
+end
 if AIO.AddAddon() then return end
 
 --[[==========================================================================
