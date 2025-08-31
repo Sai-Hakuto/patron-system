@@ -2009,3 +2009,37 @@ PatronLogger:Info("MainAIO", "Initialize", "Supported AIO requests", {
 })
 
 print("|cff00ff00[PatronSystem]|r Main AIO Handler v2.0 loaded successfully - Ready to serve clients!")
+
+-- Загружаем дополнительные модули
+local followerTestLoaded, followerTestError = pcall(function()
+    -- Пробуем сначала require
+    require("follower_test")
+end)
+
+if not followerTestLoaded then
+    PatronLogger:Error("MainAIO", "Initialize", "Failed to load follower test module via require", {
+        error = tostring(followerTestError or "unknown error")
+    })
+    
+    -- Пробуем dofile как резервный вариант
+    local dofileLoaded, dofileError = pcall(function()
+        -- Определяем путь к скрипту относительно текущего файла
+        local scriptPath = debug.getinfo(1, "S").source:match("@(.*)[\\/][^\\/]*$")
+        if scriptPath then
+            dofile(scriptPath .. "/follower_test.lua")
+        else
+            dofile("follower_test.lua") -- fallback
+        end
+    end)
+    
+    if dofileLoaded then
+        PatronLogger:Info("MainAIO", "Initialize", "Follower test module loaded via dofile")
+        followerTestLoaded = true
+    else
+        PatronLogger:Error("MainAIO", "Initialize", "Failed to load follower test module via dofile", {
+            error = tostring(dofileError or "unknown error")
+        })
+    end
+else
+    PatronLogger:Info("MainAIO", "Initialize", "Follower test module loaded successfully via require")
+end

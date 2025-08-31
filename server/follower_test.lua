@@ -59,7 +59,7 @@ local mountSpells = {
 }
 
 local helperNameMap = {
-    алайя = 1,
+    ["алайя"] = 1,
     ["арле'кино"] = 2,
     ["узан дул"] = 3
 }
@@ -104,10 +104,11 @@ local function ApplyHelperStats(npc, helperID)
     local stats = helperStats[helperID]
     if not stats then return end
 
-    -- Применяем HP множитель
-    if stats.healthMultiplier then
-        local baseHP = npc:GetMaxHealth()
-        local newHP = math.floor(baseHP * stats.healthMultiplier)
+    -- Применяем HP множитель - делаем хп равным игроку x2
+    local owner = npc:GetOwner()
+    if owner then
+        local playerHP = owner:GetMaxHealth()
+        local newHP = playerHP * 2
         npc:SetMaxHealth(newHP)
         npc:SetHealth(newHP)
     end
