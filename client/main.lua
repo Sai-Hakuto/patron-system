@@ -455,6 +455,12 @@ local function RegisterModuleListeners()
             PatronSystemNS.QuickBlessingWindow:RefreshData()
             PatronSystemNS.Logger:Info("Быстрая панель благословений обновлена")
         end
+
+        -- Обновляем быструю панель фолловеров
+        if PatronSystemNS.QuickFollowerWindow and PatronSystemNS.QuickFollowerWindow.RefreshData then
+            PatronSystemNS.QuickFollowerWindow:RefreshData()
+            PatronSystemNS.Logger:Info("Быстрая панель фолловеров обновлена")
+        end
         
         -- Обновляем главное окно с ресурсами
         if PatronSystemNS.MainWindow and PatronSystemNS.MainWindow:IsShown() then
@@ -575,7 +581,12 @@ local function CreateMainUI()
             onClick = function()
                 PatronSystemNS.Logger:Info("Нажата кнопка Followers")
                 if CheckFollowersAvailability() then
-                    PatronSystemNS.UIManager:ShowMessage("Панель фолловеров будет реализована позже", "info")
+                    if PatronSystemNS.QuickFollowerWindow then
+                        PatronSystemNS.QuickFollowerWindow:Toggle()
+                    else
+                        PatronSystemNS.Logger:Error("QuickFollowerWindow не загружен!")
+                        PatronSystemNS.UIManager:ShowMessage("Ошибка загрузки панели фолловеров", "error")
+                    end
                 else
                     PatronSystemNS.UIManager:ShowMessage("Невозможно открыть панель фолловеров - они не открыты", "error")
                 end
@@ -913,6 +924,13 @@ local function Initialize()
         PatronSystemNS.Logger:Info("QuickBlessingWindow инициализирован")
     else
         PatronSystemNS.Logger:Info("QuickBlessingWindow готов к использованию")
+    end
+
+    if PatronSystemNS.QuickFollowerWindow and PatronSystemNS.QuickFollowerWindow.Initialize then
+        PatronSystemNS.QuickFollowerWindow:Initialize()
+        PatronSystemNS.Logger:Info("QuickFollowerWindow инициализирован")
+    else
+        PatronSystemNS.Logger:Info("QuickFollowerWindow готов к использованию")
     end
 
     
