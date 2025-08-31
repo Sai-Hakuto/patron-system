@@ -4,6 +4,12 @@
 local AIO = AIO or require("AIO")
 local HireHandlers = AIO.AddHandlers("hire", {})
 
+if PatronLogger then
+    PatronLogger:Info("FollowerTest", "Init", "follower_test.lua loaded")
+else
+    print("[PatronSystem] follower_test.lua loaded")
+end
+
 -- ========== КОНСТАНТЫ ==========
 local HELPER_COST = 10   -- стоимость найма в меди
 local SCAN_RADIUS = 20   -- радиус сканирования для поиска врагов
@@ -217,6 +223,10 @@ function HireHandlers.HireHelper(player, data)
     local backSpellID = data.backSpellID
     local auraSpellID = data.auraSpellID
 
+    if PatronLogger then
+        PatronLogger:Info("HireHelper", "Start", "params", { helperIndex = helperIndex, itemID = itemID, backSpellID = backSpellID, auraSpellID = auraSpellID })
+    end
+
     -- Проверка валидности индекса
     if not HELPER_NPC_IDS[helperIndex] then 
         return AIO.Handle(player, "hire", "HireResult", {
@@ -258,13 +268,19 @@ function HireHandlers.HireHelper(player, data)
     newNPC:MoveFollow(player, 1.0, 2.0)
     
     -- Применяем кастомные статы для данного хелпера
-    ApplyHelperStats(newNPC, helperID)
+    local ok, err = pcall(ApplyHelperStats, newNPC, helperID)
+    if not ok and PatronLogger then
+        PatronLogger:Error("HireHelper", "ApplyHelperStats", err)
+    end
 
     if itemID then EquipHelperItem(newNPC, helperID, itemID) end
     if backSpellID then ApplyTransmogEffect(newNPC, backSpellID) end
     
     -- player:ModifyMoney(-HELPER_COST) -- Убрано для тестирования
     
+    if PatronLogger then
+        PatronLogger:Info("HireHelper", "Success", "Helper spawned", { helperIndex = helperIndex, helperID = helperID })
+    end
     -- Возвращаем успешный результат
     return AIO.Handle(player, "hire", "HireResult", {
         success = true,
@@ -274,6 +290,9 @@ function HireHandlers.HireHelper(player, data)
 end
 
 function HireHandlers.DismissHelper(player, helperIndex)
+    if PatronLogger then
+        PatronLogger:Info("DismissHelper", "Start", "params", { helperIndex = helperIndex })
+    end
     if not HELPER_NPC_IDS[helperIndex] then 
         return AIO.Handle(player, "hire", "DismissResult", {
             success = false,
@@ -294,7 +313,9 @@ function HireHandlers.DismissHelper(player, helperIndex)
     end
     
     npc:DespawnOrUnsummon()
-    
+    if PatronLogger then
+        PatronLogger:Info("DismissHelper", "Success", "Helper dismissed", { helperIndex = helperIndex })
+    end
     return AIO.Handle(player, "hire", "DismissResult", {
         success = true,
         helperIndex = helperIndex,
