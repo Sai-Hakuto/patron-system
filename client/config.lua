@@ -102,6 +102,7 @@ function NS.Config:GetSpeakersByType(speakerType)
 end
 --- Находит говорящего по ID и типу.
 function NS.Config:GetSpeakerByID(speakerID, speakerType)
+    speakerID = tonumber(speakerID)
     for _, s in ipairs(self:GetSpeakersByType(speakerType)) do
         if s.id == speakerID then return s end
     end
