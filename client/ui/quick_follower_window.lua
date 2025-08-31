@@ -210,7 +210,9 @@ function NS.QuickFollowerWindow:ExecuteCommand(follower, commandIndex, commandTe
             -- Отпускаем фолловера - используем DismissHelper из follower_test.lua
             local helperIndex = self:GetHelperIndexByFollowerId(follower.id)
             if helperIndex then
+                NS.Logger:Debug("QuickFollowerWindow: sending DismissHelper for index " .. tostring(helperIndex))
                 AIO.Handle("hire", "DismissHelper", helperIndex)
+                NS.Logger:Debug("QuickFollowerWindow: DismissHelper request sent")
                 -- Сообщение и обновление статуса теперь обрабатываются в callback'е
             end
         else
@@ -223,7 +225,9 @@ function NS.QuickFollowerWindow:ExecuteCommand(follower, commandIndex, commandTe
                     backSpellID = nil, -- Без эффектов пока
                     auraSpellID = nil
                 }
+                NS.Logger:Debug("QuickFollowerWindow: sending HireHelper with data " .. tostring(helperIndex))
                 AIO.Handle("hire", "HireHelper", hireData)
+                NS.Logger:Debug("QuickFollowerWindow: HireHelper request sent")
                 -- Сообщение и обновление статуса теперь обрабатываются в callback'е
             end
         end
@@ -274,6 +278,11 @@ end
 
 -- Обработчик результата найма фолловера
 function HireHandlers.HireResult(player, data)
+    local debugInfo = {}
+    for k, v in pairs(data or {}) do
+        table.insert(debugInfo, tostring(k) .. "=" .. tostring(v))
+    end
+    NS.Logger:Debug("HireResult received: " .. table.concat(debugInfo, ", "))
     local window = NS.QuickFollowerWindow
     if not window or not window.frame:IsShown() then return end
     
@@ -301,6 +310,11 @@ end
 
 -- Обработчик результата отпуска фолловера
 function HireHandlers.DismissResult(player, data)
+    local debugInfo = {}
+    for k, v in pairs(data or {}) do
+        table.insert(debugInfo, tostring(k) .. "=" .. tostring(v))
+    end
+    NS.Logger:Debug("DismissResult received: " .. table.concat(debugInfo, ", "))
     local window = NS.QuickFollowerWindow
     if not window or not window.frame:IsShown() then return end
     
