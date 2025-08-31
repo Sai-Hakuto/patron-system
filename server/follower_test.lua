@@ -19,25 +19,13 @@ local helperWeapons = {
 -- Статы и характеристики хелперов
 local helperStats = {
     [9400000] = { -- Алайя - танк/защитник
-        healthMultiplier = 2.5,  -- 250% от базового HP
-        damageMultiplier = 1.2,  -- 120% от базового урона
-        armor = 15000,           -- Дополнительная броня
-        spellPower = 500,        -- Сила заклинаний
-        attackPower = 800        -- Сила атаки
+        healthMultiplier = 2.5  -- 250% от базового HP
     },
     [9400001] = { -- Арле'Кино - дамагер
-        healthMultiplier = 1.8,  -- 180% от базового HP
-        damageMultiplier = 1.8,  -- 180% от базового урона
-        armor = 8000,            -- Средняя броня
-        spellPower = 1200,       -- Высокая сила заклинаний
-        attackPower = 1500       -- Высокая сила атаки
+        healthMultiplier = 1.8  -- 180% от базового HP
     },
     [9400002] = { -- Узан Дул - хилер/поддержка
-        healthMultiplier = 2.0,  -- 200% от базового HP
-        damageMultiplier = 0.8,  -- 80% от базового урона (слабее в атаке)
-        armor = 12000,           -- Хорошая броня
-        spellPower = 1800,       -- Очень высокая сила заклинаний для хила
-        attackPower = 600        -- Низкая сила атаки
+        healthMultiplier = 2.0  -- 200% от базового HP
     }
 }
 
@@ -109,7 +97,7 @@ end
 local function ApplyHelperStats(npc, helperID)
     local stats = helperStats[helperID]
     if not stats then return end
-    
+
     -- Применяем HP множитель
     if stats.healthMultiplier then
         local baseHP = npc:GetMaxHealth()
@@ -117,27 +105,22 @@ local function ApplyHelperStats(npc, helperID)
         npc:SetMaxHealth(newHP)
         npc:SetHealth(newHP)
     end
-    
-    -- Применяем урон множитель
-    if stats.damageMultiplier then
-        npc:SetFloatValue(UNIT_FIELD_MINDAMAGE, npc:GetFloatValue(UNIT_FIELD_MINDAMAGE) * stats.damageMultiplier)
-        npc:SetFloatValue(UNIT_FIELD_MAXDAMAGE, npc:GetFloatValue(UNIT_FIELD_MAXDAMAGE) * stats.damageMultiplier)
-    end
-    
-    -- Применяем броню
-    if stats.armor then
-        npc:SetUInt32Value(UNIT_FIELD_RESISTANCES, stats.armor)
-    end
-    
-    -- Применяем силу заклинаний и атаки (через ауры для совместимости)
-    if stats.spellPower and stats.spellPower > 0 then
-        -- Добавляем ауру силы заклинаний (пример: используем существующую ауру)
-        npc:AddAura(23028, npc) -- Arcane Brilliance или аналог
-    end
-    
-    if stats.attackPower and stats.attackPower > 0 then
-        -- Добавляем ауру силы атаки
-        npc:AddAura(6673, npc) -- Battle Shout или аналог  
+
+    -- Включаем регенерацию здоровья
+    npc:SetRegeneratingHealth(true)
+
+    -- Иммунитет к эффектам контроля
+    local IMMUNE_MECHANICS = {
+        1,  -- MECHANIC_CHARM
+        5,  -- MECHANIC_FEAR
+        7,  -- MECHANIC_ROOT
+        10, -- MECHANIC_SLEEP
+        11, -- MECHANIC_SNARE
+        12, -- MECHANIC_STUN
+        17  -- MECHANIC_POLYMORPH
+    }
+    for _, mechanic in ipairs(IMMUNE_MECHANICS) do
+        npc:SetImmuneTo(mechanic, true)
     end
 end
 
