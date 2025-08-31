@@ -62,10 +62,11 @@ function NS.QuickFollowerWindow:LoadActiveFollowers()
     if not followers then return end
     for id, info in pairs(followers) do
         if info.isDiscovered then
-            local speaker = NS.Config:GetSpeakerByID(id, NS.Config.SpeakerType.FOLLOWER)
+            local idNum = tonumber(id)
+            local speaker = NS.Config:GetSpeakerByID(idNum, NS.Config.SpeakerType.FOLLOWER)
             table.insert(self.followers, {
-                id = tonumber(id),
-                name = (speaker and speaker.name) or ("Follower " .. tostring(id)),
+                id = idNum,
+                name = (speaker and speaker.name) or ("Follower " .. tostring(idNum)),
                 isActive = info.isActive
             })
             if #self.followers >= 3 then break end
