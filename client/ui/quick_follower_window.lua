@@ -6,6 +6,10 @@
 
 local NS = PatronSystemNS
 local BW = NS.BaseWindow
+local AIO = AIO or require("AIO")
+
+-- Обработчики ответов от сервера
+local HireHandlers = AIO.AddHandlers("hire", {})
 
 NS.QuickFollowerWindow = BW:New("QuickFollowerWindow", {
     windowType = NS.Config.WindowType.DEBUG,
@@ -136,11 +140,7 @@ end
 function NS.QuickFollowerWindow:ShowCommandButtons(banner, follower)
     self:HideCommandButtons()
     local commands = {
-        follower.isActive and "Отпустить" or "Призвать",
-        "Атакуем все цели!",
-        "Переходим в оборону!",
-        "Охраняем эту позицию!",
-        "Вернись к своей роли!"
+        follower.isActive and "Отпустить" or "Призвать"
     }
     
     local width, height = 150, 28
@@ -180,17 +180,52 @@ function NS.QuickFollowerWindow:ShowCommandButtons(banner, follower)
     -- НЕ ИЗМЕНЯЕМ высоту окна - кнопки теперь вне контейнера
 end
 
+-- Получить индекс помощника по ID фолловера для соответствия с follower_test.lua
+function NS.QuickFollowerWindow:GetHelperIndexByFollowerId(followerId)
+    -- Маппинг ID фолловеров на индексы помощников в follower_test.lua
+    local mapping = {
+        [101] = 1, -- Алайя -> помощник 1 (9400000)
+        [102] = 2, -- Арле'Кино -> помощник 2 (9400001) 
+        [103] = 3  -- Узан Дул -> помощник 3 (9400002)
+    }
+    return mapping[followerId]
+end
+
+-- Обратная функция - получить ID фолловера по индексу хелпера
+function NS.QuickFollowerWindow:GetFollowerIdByHelperIndex(helperIndex)
+    local reverseMapping = {
+        [1] = 101, -- помощник 1 -> Алайя
+        [2] = 102, -- помощник 2 -> Арле'Кино
+        [3] = 103  -- помощник 3 -> Узан Дул
+    }
+    return reverseMapping[helperIndex]
+end
+
 function NS.QuickFollowerWindow:ExecuteCommand(follower, commandIndex, commandText)
-    -- Здесь будет логика выполнения команд фолловера
     NS.Logger:Info("QuickFollowerWindow: выполнение команды '" .. commandText .. "' для фолловера " .. follower.name)
     
-    -- Пример заглушек для команд
     if commandIndex == 1 then
         -- Призвать/Отпустить
         if follower.isActive then
-            NS.UIManager:ShowMessage("Отпускаем фолловера " .. follower.name, "info")
+            -- Отпускаем фолловера - используем DismissHelper из follower_test.lua
+            local helperIndex = self:GetHelperIndexByFollowerId(follower.id)
+            if helperIndex then
+                AIO.Handle("hire", "DismissHelper", helperIndex)
+                -- Сообщение и обновление статуса теперь обрабатываются в callback'е
+            end
         else
-            NS.UIManager:ShowMessage("Призываем фолловера " .. follower.name, "info")
+            -- Призываем фолловера - используем HireHelper из follower_test.lua
+            local helperIndex = self:GetHelperIndexByFollowerId(follower.id)
+            if helperIndex then
+                local hireData = {
+                    helperIndex = helperIndex,
+                    itemID = nil, -- Без оружия пока
+                    backSpellID = nil, -- Без эффектов пока
+                    auraSpellID = nil
+                }
+                AIO.Handle("hire", "HireHelper", hireData)
+                -- Сообщение и обновление статуса теперь обрабатываются в callback'е
+            end
         end
     elseif commandIndex == 2 then
         -- Атакуем все цели
@@ -209,6 +244,8 @@ function NS.QuickFollowerWindow:ExecuteCommand(follower, commandIndex, commandTe
     -- Скрываем команды после выполнения
     self:HideCommandButtons()
     self.currentlyShowingCommandsFor = nil
+    
+    -- Обновление данных теперь происходит в callback'ах от сервера
 end
 
 function NS.QuickFollowerWindow:HideCommandButtons()
@@ -233,6 +270,60 @@ function NS.QuickFollowerWindow:AdjustWindowSize()
     totalWidth = math.max(totalWidth, 260)
     
     self.frame:SetSize(totalWidth, 120)
+end
+
+-- Обработчик результата найма фолловера
+function HireHandlers.HireResult(player, data)
+    local window = NS.QuickFollowerWindow
+    if not window or not window.frame:IsShown() then return end
+    
+    if data.success then
+        NS.UIManager:ShowMessage(data.message or "Фолловер призван", "success")
+        -- Обновляем статус в DataManager
+        local followerId = window:GetFollowerIdByHelperIndex(data.helperIndex)
+        if followerId and NS.DataManager then
+            local progress = NS.DataManager:GetPlayerProgress()
+            if progress and progress.followers and progress.followers[tostring(followerId)] then
+                progress.followers[tostring(followerId)].isActive = true
+            end
+        end
+    else
+        NS.UIManager:ShowMessage(data.error or "Не удалось призвать фолловера", "error")
+    end
+    
+    -- Обновляем интерфейс
+    C_Timer.After(0.5, function()
+        if window.frame and window.frame:IsShown() then
+            window:RefreshData()
+        end
+    end)
+end
+
+-- Обработчик результата отпуска фолловера
+function HireHandlers.DismissResult(player, data)
+    local window = NS.QuickFollowerWindow
+    if not window or not window.frame:IsShown() then return end
+    
+    if data.success then
+        NS.UIManager:ShowMessage(data.message or "Фолловер отпущен", "info")
+        -- Обновляем статус в DataManager
+        local followerId = window:GetFollowerIdByHelperIndex(data.helperIndex)
+        if followerId and NS.DataManager then
+            local progress = NS.DataManager:GetPlayerProgress()
+            if progress and progress.followers and progress.followers[tostring(followerId)] then
+                progress.followers[tostring(followerId)].isActive = false
+            end
+        end
+    else
+        NS.UIManager:ShowMessage(data.error or "Не удалось отпустить фолловера", "error")
+    end
+    
+    -- Обновляем интерфейс
+    C_Timer.After(0.5, function()
+        if window.frame and window.frame:IsShown() then
+            window:RefreshData()
+        end
+    end)
 end
 
 print("|cff00ff00[PatronSystem]|r QuickFollowerWindow загружен")
